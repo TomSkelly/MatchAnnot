@@ -1,0 +1,86 @@
+
+MatchAnnot is a python script which accepts a SAM file of IsoSeq
+transcripts aligned to a genomic reference and matches them to an
+annotation database in GTF format.
+
+The aligner used must be splice-aware. MatchAnnot has been developed
+using the STAR aligner (http://code.google.com/p/rna-star). The
+reference supplied to STAR was created using the hg19 human reference
+and the GENCODE-19 annotations file:
+(ftp://ftp.sanger.ac.uk/pub/gencode/Gencode_human/release_19/gencode.v19.annotation.gtf.gz)
+
+
+MatchAnnot expects the following inputs:
+
+    --gtf          (Mandatory) Annotation file in GTF format.
+    --clusters     (Optional)  cluster_report.csv as produced by IsoSeq
+    (pipe or arg)  (Mandatory) SAM file of IsoSeq transcripts aligned to genomic reference
+
+
+The output of the gencode_isoseq.pl script contains several types of line:
+
+isoform:     A mapped isoform, output of IsoSeq. Line shows isoform name,
+             and start and end genomic coordinates of alignment.
+
+cl:          A list of the reads-of-insert which were clustered to create the
+             isoform. This information is printed only if a cluster report file
+             is supplied via the --clusters parameter. Each line lists one or 
+	     more reads from a single SMRTcell, labelled as either full-length
+             or non-FL. The mapping from SMRTcell number to full SMRTcell name
+	     is in the summary at the end of the output.
+
+polyA:       A list of the positions where polyadenylation motifs were found 
+             near the 3' end of the isoform.
+
+gene:        A gene in the annotation file whose position overlaps the
+             aligned isoform. Line shows gene name, its start and end
+             coordinates, and the differences between those and the
+             isoform start and end.
+
+tr:          An annotated transcript of the gene under consideration. Line
+             shows transcript name, a score, and the exon-to-exon
+             mapping. Each [] grouping in the exon mapping is
+             a list of transcript exons which match the isoform exons
+             (see example below). Scores are as follows:
+
+             5: IsoSeq exons match annotation exons one-for-one. Sizes agree
+                except for leading and trailing edges.
+
+             4: Like 5, but leading and trailing edge sizes differ by a 
+                larger amount than the score-5 transcript found for this gene.
+
+             3: One-for-one exon match, but sizes of internal exons disagree.
+
+             2: One-for-one match as far as it goes, but it ends early. Not
+                all transcript exons are present in the isoform.
+
+             1: Exons match only sporadically.
+
+exon:        Details of a single exon match. Shown only for transcripts
+             with score >= 3. Line shows isoform and transcript start and
+             stop coordinates and the delta between them, plus the
+             number of indels found in the alignment (per the cigar
+             string).
+
+result:      A one-line summary for the isoform, showing the best gene and
+             trancript found, and the resulting score.
+
+
+An example of an exon mapping (exons are numbered from 0):
+
+                   0             1         2               3           4
+   isoform:        ==========    ======    ==============  ===         =======
+   transcript      =====        =========    ====    =========  =====    ========
+                   0            1            2       3          4        5
+
+   maps as follows:
+
+   [0] [1] [2,3] [3] [5]
+
+
+   An ideal mapping is one-for-one:
+
+   [0] [1] [2] [3] [4]
+
+
+   To make it *really* ideal, the exon coordinates should be equal as well (or nearly so).

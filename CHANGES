@@ -1,0 +1,14 @@
+# AUTHOR: Tom Skelly (thomas.skelly@fnlcr.nih.gov)
+
+# CHANGE HISTORY:
+
+#   20140728.01 - Baselined. Output matches perl version.
+#   20140804.01 - Keep a single gene list per chr, rather than one per strand.
+#               - Create AnnotationCursor class for walking annotation list.
+#               - If not genes found, try the other strand.
+#   20140805.01 - Add multimap and opposite strand counts to summary lines.
+#   20140821.01 - Don't look for cluster ID if it isn't there.
+#   20140903.01 - Check that SAM file is sorted.
+#               - Exons are numbered 1..N.
+#   20140908.01 - Add # of exons to result line.
+#               - Print cigar: line.
