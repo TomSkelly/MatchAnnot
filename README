@@ -22,6 +22,8 @@ The output of the gencode_isoseq.pl script contains several types of line:
 isoform:     A mapped isoform, output of IsoSeq. Line shows isoform name,
              and start and end genomic coordinates of alignment.
 
+cigar:       The cigar string from the SAM file entry for the isoform.
+
 cl:          A list of the reads-of-insert which were clustered to create the
              isoform. This information is printed only if a cluster report file
              is supplied via the --clusters parameter. Each line lists one or 
@@ -51,10 +53,12 @@ tr:          An annotated transcript of the gene under consideration. Line
 
              3: One-for-one exon match, but sizes of internal exons disagree.
 
-             2: One-for-one match as far as it goes, but it ends early. Not
-                all transcript exons are present in the isoform.
+             2: The best match among all score=1 transcripts.
 
-             1: Exons match only sporadically.
+             1: Some exons overlap, overlaps are 1-for-1 where they exist.
+
+	     0: Everyting else: isoform overlaps gene, but little or
+	        no exon congruance.
 
 exon:        Details of a single exon match. Shown only for transcripts
              with score >= 3. Line shows isoform and transcript start and
