@@ -13,6 +13,7 @@ import os
 import sys
 import optparse
 import re        # regular expressions
+import cPickle as pickle
 
 from tt_log import logger
 import Annotations as anno
@@ -21,7 +22,7 @@ import Clusters    as cl
 import CigarString as cs
 import PolyA
 
-VERSION = '20140909.01'
+VERSION = '20140922.01'
 
 FLAG_NOT_ALIGNED = 0x04         # SAM file flags
 FLAG_REVERSE     = 0x10
@@ -38,7 +39,14 @@ def main ():
     if opt.clusters is not None:
         clusterList = cl.ClusterList (opt.clusters)
 
-    annotList   = anno.AnnotationList (opt.gtf)
+    if opt.gtfpickle is not None:
+        handle = open (opt.gtfpickle, 'r')
+        pk = pickle.Unpickler (handle)
+        annotList = pk.load()
+        handle.close()
+    else:
+        annotList   = anno.AnnotationList (opt.gtf)
+
     annotCursor = anno.AnnotationCursor (annotList)
 
     polyAFinder = PolyA.PolyA()
@@ -194,7 +202,7 @@ def main ():
 
     logger.debug('finished')
 
-def matchTranscripts (exons, gene):
+def matchTranscripts (readExons, gene):
     '''
     Given the list of annotated transcripts for a gene of interest,
     compare our isoform's exons to the exons of each transcript. Look for
@@ -210,25 +218,29 @@ def matchTranscripts (exons, gene):
 
     bestScore = best.Best()
     bestTrunc = best.Best(reverse=True)
+    bestHits  = best.Best()
 
     for ix, tran in enumerate (gene):
 
         tranExons = tran.children                                     # the list of exons for this transcript
 
-        over1, over2 = findOverlaps (exons, tranExons)
-        strings.append(overlap2string(over1))                         # save it for the print step as a string
+        overR, overT = findOverlaps (readExons, tranExons)
+        strings.append(overlap2string(overR))                         # save it for the print step as a string
 
-        if not isMatch (over1):                                       # do leading exons (at least) match?
+        score = 0                                                     # default score
+        if canMatch (overR):
+
+            numHits = sum([ len(x) == 1 for x in overR ])             # count of matching exons
+            bestHits.update (numHits, ix)                             # keep for possible 1->2 promotion
+
             score = 1
-        elif len(over1) != len(over2):                                # do *all* exons match (i.e., overlap)?
-            score = 2
-        elif not internalMatch (exons, tranExons):                    # do their sizes match?
-            score = 3
-        else:
-            score = 4                                                 # may get promoted later
-            trunc = abs(exons[0].start - tranExons[0].start) \
-                +   abs(exons[-1].end  - tranExons[-1].end)           # leading and trailing exon truncation amount
-            bestTrunc.update (trunc, ix)                              # keep track of score-4 with the smallest UTR size difference
+            if isMatch (overR, overT):
+                score = 3
+                if internalMatch (readExons, tranExons):              # do their sizes match?
+                    score = 4                                         # may get promoted later
+                    trunc = abs(readExons[0].start - tranExons[0].start) \
+                        +   abs(readExons[-1].end  - tranExons[-1].end)   # leading and trailing exon truncation amount
+                    bestTrunc.update (trunc, ix)                          # keep track of score-4 with the smallest UTR size difference
 
         bestScore.update (score, ix)
         scores.append(score)                                          # save for the print step
@@ -236,19 +248,19 @@ def matchTranscripts (exons, gene):
     if bestScore.value == 4:                                          # promote the best 4 (if there is one) to a 5
         scores[bestTrunc.which] = 5
         bestScore.update (5, bestTrunc.which)
+    elif bestScore.value == 1:
+        scores[bestHits.which] = 2                                    # promote the best 1 to a 2
+        bestScore.update (2, bestHits.which)
 
     # Now we print the results:
-
-####    for ix in xrange(gene.numChildren()):
-####        tran = gene[ix]
 
     for ix, tran in enumerate (gene):
 
         print 'tr:       %-20s  sc: %d  ex: %2d  %5d  id: %-20s   %s' \
             % (tran.name, scores[ix], tran.numChildren(), tran.length, tran.ID, strings[ix])
 
-####        if scores[ix] >= 3:
-        showCoords (exons, tran)
+        if scores[ix] >= 2:
+            showCoords (readExons, tran)
 
     return gene[bestScore.which], scores[bestScore.which]     # return best transcript and score
 
@@ -295,7 +307,7 @@ def findOverlaps (list1, list2):
     return over1, over2
 
 
-def overlap2string (list1):
+def overlap2string (over1):
     '''Create a printable string representation of an overlap list.'''
 
     # As of version 20140903.01, exons in *printed* output are
@@ -303,53 +315,15 @@ def overlap2string (list1):
 
     fields = list()
 
-    for sublist in list1:
+    for sublist in over1:
         strList =  [str(x+1) for x in sublist]                # join doesn't do ints
         fields.append ('[' + ','.join(strList) + ']')
 
     return ' '.join(fields)
 
 
-def isMatch (list1):
-    '''Test whether an interval overlap list hits every interval.'''
-
-    # Note that if the supplied list is shorter than the list it was
-    # compared to, it will pass. I.e., the following situation is a
-    # pass:
-
-    #    list-1:   [0] [1] [2] [3] [4]
-    #    list-2:   [0] [1] [2] [3] [4] [] [] []
-
-    for ix in xrange(len(list1)):
-        if len(list1[ix]) != 1 or list1[ix][0] != ix:
-            return False
-
-    return True
-
-
-def internalMatch (list1, list2):
-    '''
-    Given two lists of exon intervals which overlap one-for-one,
-    determine whether their coordinates match exactly, EXCEPT for the
-    start of the first exon and the end of the last exon. That
-    variation is currently thought to be caused (at the 3' end, at
-    least) by polyadenylation at more sites than the annotations
-    record.
-    '''
-    
-    for ix in xrange(1,len(list1)):                    # check starts, skip exon 0
-        if list1[ix].start != list2[ix].start:
-            return False
-
-    for ix in xrange(len(list1)-1):                    # check ends, skip last exon
-        if list1[ix].end != list2[ix].end:
-            return False
-
-    return True
-
-
-def canPrint (over):
-    '''Determine whether a set of overlapping exons can be meaningfully printed.'''
+def canMatch (over):
+    '''Determine whether a set of overlapping exons can be meaningfully matched.'''
 
     last = -1                              # internally, exons are numbered 0..N-1
     hit  = False
@@ -367,6 +341,41 @@ def canPrint (over):
 
     return hit
 
+
+def isMatch (over1, over2):
+    '''Test whether an interval overlap list hits every interval.'''
+
+    if len(over1) != len(over2):
+        return False
+
+    for ix in xrange(len(over1)):
+        if len(over1[ix]) != 1 or over1[ix][0] != ix:
+            return False
+
+    return True
+
+
+def internalMatch (list1, list2):
+    '''
+    Given two lists of exon intervals which overlap one-for-one (as
+    determined by isMatch), determine whether their coordinates match
+    exactly, EXCEPT for the start of the first exon and the end of the
+    last exon. That variation is currently thought to be caused (at
+    the 3' end, at least) by polyadenylation at more sites than the
+    annotations record.
+    '''
+    
+    for ix in xrange(1,len(list1)):                    # check starts, skip exon 0
+        if list1[ix].start != list2[ix].start:
+            return False
+
+    for ix in xrange(len(list1)-1):                    # check ends, skip last exon
+        if list1[ix].end != list2[ix].end:
+            return False
+
+    return True
+
+
 def showCoords (readExons, tranExons):
     '''
     Print coordinates of matched exons, given their interval
@@ -376,8 +385,6 @@ def showCoords (readExons, tranExons):
     '''
 
     overR, overT = findOverlaps (readExons, tranExons)      # already done in matchTranscripts, but easier to recompute than to save
-    if not canPrint (overR):                                # check that there are no multi-exon overlaps
-        return
 
     ixR = 0
     ixT = 0
@@ -466,10 +473,12 @@ def getParms ():                       # use default input sys.argv[1:]
 
     parser = optparse.OptionParser(usage='%prog [options] <SAM_file> ... ')
 
-    parser.add_option ('--gtf',      help='annotations in gtf format (required)')
-    parser.add_option ('--clusters', help='cluster_report.csv file name (optional)')
+    parser.add_option ('--gtf',       help='annotations in gtf format')
+    parser.add_option ('--gtfpickle', help='annotations in pickled gtf format')
+    parser.add_option ('--clusters',  help='cluster_report.csv file name (optional)')
 
     parser.set_defaults (gtf=None,
+                         gtfpickle=None,
                          clusters=None,
                          )
 

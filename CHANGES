@@ -12,3 +12,7 @@
 #               - Exons are numbered 1..N.
 #   20140908.01 - Add # of exons to result line.
 #               - Print cigar: line.
+#   20140910.01 - Score=2 now means best 1-1 exon match.
+#               - Print exons even if they don't match perfectly.
+#   20140911.01 - Support for pickled annotation file.
+#   20140922.01 - Revamp matchAnnot scoring system.

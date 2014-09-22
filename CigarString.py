@@ -19,12 +19,23 @@ class Exon (object):
         self.inserts = 0         # initial values, need to be updated
         self.deletes = 0
 
+    def __lt__ (self, other):
+        '''Support sorting of exons based on position then size.'''
+
+        if self.start < other.start:
+            return True
+        elif self.start > other.start:
+            return False
+        else:
+            return self.end < other.end
+
+
 class CigarString (object):
 
     def __init__ (self, string):
 
         self.string = string
-        self.fields = re.findall(regexFields, string)
+        self.cfields = re.findall(regexFields, string)
 
         match = re.search(regexLeading, self.string)
         self.leading = int(match.group(1)) if match is not None else 0
@@ -37,7 +48,7 @@ class CigarString (object):
 
         length = 0
 
-        for count, op in self.fields:
+        for count, op in self.cfields:
 
             # M = bases match (or mismatch) one-for-one: count them
             # N = bases in reference but not in read (e.g., introns in transcript read): count them
@@ -51,6 +62,18 @@ class CigarString (object):
                 
         return length
 
+
+    def softclips (self):
+        return self.leading, self.trailing
+
+
+    def fields (self):
+        '''Generator function to return (count, op) for each field in cigar string.'''
+
+        for count, op in self.cfields:
+            yield int(count), op
+
+        return
 
     def exons (self, start):
         '''
@@ -69,7 +92,7 @@ class CigarString (object):
 
         exonList = [ Exon(start, start-1) ]    # first exon
 
-        for count, op in self.fields:
+        for count, op in self.cfields:
 
             count = int(count)
 
