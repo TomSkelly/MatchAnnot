@@ -100,7 +100,7 @@ def main ():
     fastaNonAligned.close()
     for fasta in fastaList:
         fasta.close()
-        fasta.makeRef()
+####        fasta.makeRef()
 
     logger.debug('found %d reads, of which %d aligned, %d were f1p0', totReads, totAlign, totUnsup)
     logger.debug('finished')
