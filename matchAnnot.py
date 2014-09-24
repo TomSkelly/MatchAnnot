@@ -22,7 +22,7 @@ import Clusters    as cl
 import CigarString as cs
 import PolyA
 
-VERSION = '20140922.01'
+VERSION = '20140923.01'
 
 FLAG_NOT_ALIGNED = 0x04         # SAM file flags
 FLAG_REVERSE     = 0x10
@@ -51,7 +51,6 @@ def main ():
 
     polyAFinder = PolyA.PolyA()
 
-    regexCluster = re.compile('(c\d+)')      # isoform name format varies, but cnnnn should be in there somewhere
     regexAS = re.compile('(AS:i:\d+)')       # alignment score
     regexUT = re.compile('(uT:A:\d+)')       # mismatch reason (ToDo: Translate this)
 
@@ -88,9 +87,7 @@ def main ():
             print '\nisoform:  %-16s' % (clusterName)
 
             if opt.clusters is not None:                       # print cluster (cl:) lines
-                clusterID = re.search(regexCluster, clusterName).group(1)
-                for FL, cellNo, reads in clusterList.showReads(clusterID):
-                    print 'cl:      %2d %-5s ' % (cellNo, FL), '  '.join(['%-16s' % x for x in reads])
+                printClusterReads (clusterList, clusterName)
 
             alnScore  = re.search(regexAS, line).group(1)      # alignment score
             alnReason = re.search(regexUT, line).group(1)      # mismatch reason
@@ -122,9 +119,7 @@ def main ():
         print 'cigar:    %s' % cigarString
 
         if opt.clusters is not None:                     # print cluster (cl:) lines
-            clusterID = re.search(regexCluster, clusterName).group(1)
-            for FL, cellNo, reads in clusterList.showReads(clusterID):
-                print 'cl:      %2d %-5s ' % (cellNo, FL), '  '.join(['%-16s' % x for x in reads])
+            printClusterReads (clusterList, clusterName)
 
         foundPolyA = False
         print 'polyA:  ',                                # print 'polyA:' line
@@ -468,6 +463,16 @@ def printStartStop (tranExons, exonT):
         if exonT.start <= tranExons.stopcodon and exonT.end >= tranExons.stopcodon:
             print '  stop:  %4d' % (tranExons.stopcodon  - exonT.end),          # distance from end of exon
     print
+
+def printClusterReads (clusterList, clusterName):
+    '''Print full and partial read names which make up a cluster.'''
+
+    clusterID = re.search('(c\d+)', clusterName).group(1)      # isoform name format varies, but cnnnn should be in there somewhere
+    for FL, cellNo, reads in clusterList.showReads(clusterID):
+        flag = 'cl-FL:' if FL == 'FL' else 'cl-nfl:'           # shorten 'nonFL' to 'nfl'
+        for ix in xrange(0,len(reads),8):                      # print 8 reads to the line
+            print '%-7s   %2d  ' % (flag, cellNo), '  '.join(['%-16s' % x for x in reads[ix:ix+8] ])
+
 
 def getParms ():                       # use default input sys.argv[1:]
 
