@@ -16,13 +16,13 @@ import re        # regular expressions
 import cPickle as pickle
 
 from tt_log import logger
-import Annotations as anno
-import Best        as best
-import Clusters    as cl
-import CigarString as cs
+import Annotations   as anno
+import Best          as best
+import ClusterReport as cl
+import CigarString   as cs
 import PolyA
 
-VERSION = '20140923.01'
+VERSION = '20140926.01'
 
 FLAG_NOT_ALIGNED = 0x04         # SAM file flags
 FLAG_REVERSE     = 0x10

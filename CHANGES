@@ -17,3 +17,4 @@
 #   20140911.01 - Support for pickled annotation file.
 #   20140922.01 - Revamp matchAnnot scoring system.
 #   20140923.01 - Tidier version of cl: lines.
+#   20140926.01 - Rename Clusters.py to ClusterReport.py
