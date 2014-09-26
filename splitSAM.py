@@ -16,7 +16,7 @@ import string
 from tt_log import logger
 import CigarString as cs
 
-VERSION = '20140903.01'
+VERSION = '20140924.01'
 
 FLAG_NOT_ALIGNED = 0x04         # SAM file flags
 FLAG_REVERSE     = 0x10
@@ -100,7 +100,7 @@ def main ():
     fastaNonAligned.close()
     for fasta in fastaList:
         fasta.close()
-####        fasta.makeRef()
+        fasta.makeRef()
 
     logger.debug('found %d reads, of which %d aligned, %d were f1p0', totReads, totAlign, totUnsup)
     logger.debug('finished')
