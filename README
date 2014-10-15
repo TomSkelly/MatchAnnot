@@ -12,9 +12,10 @@ and the GENCODE-19 annotations file:
 
 MatchAnnot expects the following inputs:
 
-    --gtf          (Mandatory) Annotation file in GTF format.
-    --clusters     (Optional)  cluster_report.csv as produced by IsoSeq
-    (pipe or arg)  (Mandatory) SAM file of IsoSeq transcripts aligned to genomic reference
+    --gtf          Annotation file, in format as described by --format option (Mandatory).
+    --format       Format of annotation file: 'standard', 'alt' or 'pickle' (default: standard).
+    --clusters     cluster_report.csv as produced by IsoSeq (Optional).
+    (pipe or arg)  SAM file of IsoSeq transcripts aligned to genomic reference (Mandatory).
 
 
 The output of the gencode_isoseq.pl script contains several types of line:
@@ -69,22 +70,24 @@ exon:        Details of a single exon match. Shown only for transcripts
 result:      A one-line summary for the isoform, showing the best gene and
              trancript found, and the resulting score.
 
+summary:     Bookkeeping information at the end.
+
 
 An example of an exon mapping (exons are numbered from 0):
 
-                   0             1         2               3           4
+                   1             2         3               4           5
    isoform:        ==========    ======    ==============  ===         =======
    transcript      =====        =========    ====    =========  =====    ========
-                   0            1            2       3          4        5
+                   1            2            3       4          5        6
 
    maps as follows:
 
-   [0] [1] [2,3] [3] [5]
+   [1] [2] [3,4] [4] [6]
 
 
    An ideal mapping is one-for-one:
 
-   [0] [1] [2] [3] [4]
+   [1] [2] [3] [4] [5]
 
 
    To make it *really* ideal, the exon coordinates should be equal as well (or nearly so).
