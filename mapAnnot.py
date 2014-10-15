@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 
 import Annotations as anno
 
+VERSION = '20140930.01'
+
 DEF_OUTPUT = 'transcript_sizes.png'
 DEF_XMAX   = 4000
 DEF_TITLE = 'Transcript lengths in annotation file'
@@ -35,8 +37,8 @@ def main ():
 
     for chr in annotList.chromosomes():
         for strand in annotList.strands(chr):
-            for geneEnt in annotList.geneList(chr, strand).nextChild():
-                for tranEnt in geneEnt.nextChild():
+            for geneEnt in annotList.geneList(chr, strand).getChildren():
+                for tranEnt in geneEnt.getChildren():
 
                     if tranEnt.length > 100000:
                         print '%-5s  %s  %2d  %5d  %s' % (chr, strand, tranEnt.numChildren(), tranEnt.length, tranEnt.name)

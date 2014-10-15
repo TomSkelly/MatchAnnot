@@ -7,6 +7,8 @@ import sys
 import re                       # for regular expressions
 from tt_log import logger
 
+VERSION = '20140930.01'
+
 class Annotation (object):
 
     def __init__ (self, start, end, strand, name):
@@ -20,10 +22,30 @@ class Annotation (object):
         self.name   = name
         self.children = None
         
+    def __getitem__ (self, ix):
+        '''Support indexing for an Annotation object by returning children[ix].'''
+        return self.children[ix]
+
+    def __len__ (self):
+        '''Support indexing for an Annotation object by returning len(children).'''
+        return len(self.children)
+
+    def updateStartEnd (self, start, end):
+        '''
+        With alternative format GTF annotation files, the start and
+        end coordinates of genes and transcripts must be infered from
+        the exons entries. This method adjusts them given new information.
+        '''
+
+        if self.start > start:
+            self.start = start
+        if self.end   < end:
+            self.end   = end
+
     def addChild (self, child):
         '''
         Add a child Annotation to the list of children of this
-        Annotation object. Not that exons in the - strand are listed
+        Annotation object. Note that exons in the - strand are listed
         in descending position order in the annotation file. We want
         them always in ascending order, hence the start position check
         done here. It also constitutes a sanity check on the order of
@@ -40,18 +62,10 @@ class Annotation (object):
 ####            raise RuntimeError('out of sequence: %s' % child.name)
             logger.debug('out of sequence: %s' % child.name)
             self.children.append(child)
-            self.children.sort()
+            self.children.sort()           # this better not happen very often !
 
-    def __getitem__ (self, ix):
-        '''Support indexing for an Annotation object by returning children[ix].'''
-        return self.children[ix]
-
-    def __len__ (self):
-        '''Support indexing for an Annotation object by returning len(children).'''
-        return len(self.children)
-
-    def nextChild (self):
-        '''Generator function to return children one by one.'''
+    def getChildren (self):
+        '''Generator function to return children, which are Annotation objects themselves, one by one.'''
 
         if self.children is None:
             return
@@ -67,30 +81,56 @@ class Annotation (object):
 
 class AnnotationList (object):
     
-    def __init__ (self, filename):
+    def __init__ (self, filename, altFormat=False):
         '''
-        self.annot is a dict keyed by chr.  Each dict entry is a list
-        of dicts, one per gene. Each such dict includes a list of
-        children, which are dicts with the same structure as the
-        parent. The children in a gene entry are transcripts. The
-        children in a transcript entry are exons.
+        self.annot is a dict keyed by chr.  Each dict entry is a
+        top-level Annotation object for that chr. An Annotation object
+        contains a list of next-level Annotation objects (its
+        'children'). The children of a chr entry are genes.  The
+        children of a gene entry are transcripts. The children of a
+        transcript entry are exons.
         '''
 
-        logger.debug('reading annotations from %s' % filename)
+        # When matchAnnot got wider use, it emerged that the format
+        # for tags in GTF files is not standardized. The default path
+        # here processes a GENCODE-like file, which includes separate
+        # entries for genes, transcripts and exons in a hierarchical
+        # arrangement. The altFormat path accepts a file where genes
+        # and transcripts are identified implicitly by showing up in
+        # exon entries.
+
+        # I could have implemented this several ways. One logical
+        # choice would have been to create two subclasses of the
+        # AnnotationList class. But there are no obvious benefits to
+        # that extra generality, since the two classes would differ
+        # only in the constructor, and the caller's interface would be
+        # a bit more clumsy. So all I've done is call one of two
+        # methods out of the constructor, based on a flag passed by
+        # the caller.
 
         self.filename = filename
-        self.annot    = dict()       # this is the stuff
+        self.annot    = dict()       # this is the stuff! key=chr value=top-level Annotation object for chr
+        self.geneDict = None         # lookup table by gene name (created and cached when needed)
 
-        regexGene = re.compile ('gene_name \"([^\"]+)\"\; ')
-        regexTran = re.compile ('transcript_name \"([^\"]+)\"\; ')
-        regexTID  = re.compile ('transcript_id \"([^\"]+)\"\; ')
-        regexExon = re.compile ('exon_number \"?(\d+)\"?\; ')         # some files have quotes around exon number, some don't
+        if not altFormat:
+            self.initFromStandard()
+        else:
+            self.initFromAlt()
+
+    def initFromStandard (self):
+
+        logger.debug('reading annotations in standard format from %s' % self.filename)
+
+        regexGene = re.compile ('gene_name \"([^\"]+)\"\;')
+        regexTran = re.compile ('transcript_name \"([^\"]+)\"\;')
+        regexTID  = re.compile ('transcript_id \"([^\"]+)\"\;')
+        regexExon = re.compile ('exon_number \"?(\d+)\"?\;')         # some files have quotes around exon number, some don't
 
         numGenes = 0
         numTrans = 0
         numExons = 0
 
-        handle = open (filename, 'r')
+        handle = open (self.filename, 'r')
 
         for line in handle:
 
@@ -101,7 +141,13 @@ class AnnotationList (object):
             start = int(start)
             end   = int(end)
 
-            chrEnt = self.annot.setdefault (chr, Annotation(0, 0, '+', chr))    # dummy top entry for chr
+#           chrEnt = self.annot.setdefault (chr, Annotation(0, 0, '+', chr))    # dummy top entry for chr
+#               Used to do this as above. But that creates an Annotation object
+#               every time, then throws it away if chr already exists!
+
+            if chr not in self.annot:
+                self.annot[chr] = Annotation(0, 0, '+', chr)       # dummy top entry for chr
+            chrEnt = self.annot[chr]
 
             if type == 'gene':
 
@@ -154,6 +200,91 @@ class AnnotationList (object):
 
         logger.debug('read %d genes, %d transcripts, %d exons' % (numGenes, numTrans, numExons))
 
+        return
+
+    def initFromAlt (self):
+        '''Initialize an AnnotationList from a GTF annotation file in Alternative format.'''
+
+        # Alternative format annotation files include entries for
+        # exons only. There are no explicit entries for genes or
+        # transcripts. Gene and transcript information must be
+        # inferred from the exon entries. Specifically,
+        # gene/transcript start and end coordinates will be the lower
+        # and upper bounds of the exons they contain.
+
+        logger.debug('reading annotations in alternate format from %s' % self.filename)
+
+        regexGene = re.compile ('gene_name \"*([^\"]+)\"*\;')
+        regexTran = re.compile ('transcript_name \"*([^\"]+)\"*\;')
+        regexTID  = re.compile ('transcript_id \"*([^\"]+)\"*\;')
+        regexExon = re.compile ('exon_number \"*(\d+)\"*\;')         # some files have quotes around exon number, some don't
+
+        numGenes = 0
+        numTrans = 0
+        numExons = 0
+
+        geneEnt = None
+        tranEnt = None
+
+        handle = open (self.filename, 'r')
+
+        for line in handle:
+
+            if line.startswith('#'):               # skip comment line
+                continue
+
+            chr, source, type, start, end, score, strand, frame, attrs = line.strip().split('\t')
+            start = int(start)
+            end   = int(end)
+
+            if chr not in self.annot:
+                self.annot[chr] = Annotation(0, 0, '+', chr)       # dummy top entry for chr
+            chrEnt = self.annot[chr]
+
+            if type == 'exon':
+
+                geneName = re.search(regexGene, attrs).group(1)
+                tranName = re.search(regexTran, attrs).group(1)
+                tranID   = re.search(regexTID,  attrs).group(1)
+                exonNum  = int(re.search(regexExon, attrs).group(1))
+                exonName = '%s/%d' % (tranName, exonNum)     # exons don't have names: make one up
+
+                if geneEnt is None or geneName != geneEnt.name:
+                    geneEnt = Annotation (start, end, strand, geneName)
+                    chrEnt.addChild (geneEnt)
+                    numGenes += 1
+                else:
+                    geneEnt.updateStartEnd (start, end)       # expand start/end coords of current gene
+                    
+                if tranEnt is None or tranName != tranEnt.name:
+                    tranEnt = Annotation (start, end, strand, tranName)
+                    tranEnt.ID     = tranID                   # only transcripts have ID and length attributes
+                    tranEnt.length = 0
+                    geneEnt.addChild(tranEnt)
+                    numTrans += 1
+                else:
+                    tranEnt.updateStartEnd (start, end)       # expand start/end coords of current transcript
+
+                tranEnt.length += end - start + 1             # add this exon to total transcript length
+                    
+                if exonNum != tranEnt.numChildren() + 1:
+                    raise RuntimeError ('transcript name %s exons out of sequence' % (tranName))
+
+                exonEnt = Annotation (start, end, strand, exonName)
+                tranEnt.addChild(exonEnt)
+                numExons += 1
+
+            elif type == 'start_codon':
+                tranEnt.startcodon = start
+            elif type == 'stop_codon':
+                tranEnt.stopcodon  = start
+
+        handle.close()
+
+        logger.debug('read %d genes, %d transcripts, %d exons' % (numGenes, numTrans, numExons))
+
+        return
+
     def chromosomes (self):
         '''Generator function for the chromosome names in an AnnotationList object.'''
 
@@ -168,6 +299,29 @@ class AnnotationList (object):
         if chr not in self.annot:
             raise RuntimeError ('chromosome %s not in annotation' % chr)
         return self.annot[chr]
+
+    def getGeneDict (self):
+        '''Create and cache dict: key=gene name, value=Annotation object for gene.'''
+
+        if self.geneDict is None:
+
+            logger.debug('creating gene name lookup table')
+
+            self.geneDict = dict()
+
+            for chr in self.chromosomes():
+                for gene in self.annot[chr].getChildren():
+                    self.geneDict.setdefault(gene.name, []).append(gene)
+
+        return self.geneDict
+
+    def getGene (self, geneName):
+
+        gd = self.getGeneDict()
+        if geneName in gd:
+            return gd[geneName]
+        else:
+            return None
 
 
 class AnnotationCursor (object):

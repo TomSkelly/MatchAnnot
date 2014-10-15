@@ -18,11 +18,12 @@ import cPickle as pickle
 from tt_log import logger
 import Annotations   as anno
 import Best          as best
-import ClusterReport as cl
+import Cluster       as cl
+import ClusterReport as clrep
 import CigarString   as cs
 import PolyA
 
-VERSION = '20140926.01'
+VERSION = '20141015.01'
 
 FLAG_NOT_ALIGNED = 0x04         # SAM file flags
 FLAG_REVERSE     = 0x10
@@ -37,13 +38,15 @@ def main ():
     opt, args = getParms()
 
     if opt.clusters is not None:
-        clusterList = cl.ClusterList (opt.clusters)
+        clusterList = clrep.ClusterList (opt.clusters)     # read the cluster_report.csv file, if supplied
 
-    if opt.gtfpickle is not None:
-        handle = open (opt.gtfpickle, 'r')
+    if opt.format == 'pickle':
+        handle = open (opt.gtf, 'r')
         pk = pickle.Unpickler (handle)
         annotList = pk.load()
         handle.close()
+    elif opt.format == 'alt':
+        annotList   = anno.AnnotationList (opt.gtf, altFormat=True)
     else:
         annotList   = anno.AnnotationList (opt.gtf)
 
@@ -69,6 +72,7 @@ def main ():
     totByScore = [0,0,0,0,0,0]    # indexed by score
     totSplice  = [0,0,0,0,0,0]
 
+    clusterDict = dict()          # annotation matches saved for later pickling
     lastPos = dict()              # current position in SAM file by chr (for sort check)
 
     for line in handle:           # main loop: read the SAM file
@@ -89,10 +93,15 @@ def main ():
             if opt.clusters is not None:                       # print cluster (cl:) lines
                 printClusterReads (clusterList, clusterName)
 
-            alnScore  = re.search(regexAS, line).group(1)      # alignment score
-            alnReason = re.search(regexUT, line).group(1)      # mismatch reason
+            print 'result:   %-50s no_alignment_found' % clusterName,    # no EOL yet
 
-            print 'result:   %-50s no_alignment_found  %s  %s' % (clusterName, alnReason, alnScore)
+            alnReason = re.search(regexUT, line)      # mismatch reason
+            if alnReason is not None:
+                print ' %s' % alnReason.group(1),
+            alnScore  = re.search(regexAS, line)      # alignment score
+            if alnScore is not None:
+                print ' %s' % alnScore.group(1),
+            print
 
             continue
 
@@ -178,6 +187,12 @@ def main ():
             totByScore[bestHit.value] += 1
             if foundPolyA:
                 totSplice[bestHit.value] += 1
+
+        if opt.outpickle is not None:
+            clusterDict[clusterName] = cl.Cluster(clusterName, flags, chr, start, strand, cigarString, bases)
+
+    if opt.outpickle is not None:
+        writePickle (opt.outpickle, clusterDict)         # save matches as pickle file
 
     print  '\nsummary: version %s\n' % VERSION
 
@@ -474,17 +489,35 @@ def printClusterReads (clusterList, clusterName):
             print '%-7s   %2d  ' % (flag, cellNo), '  '.join(['%-16s' % x for x in reads[ix:ix+8] ])
 
 
+def writePickle (filename, clusters):
+    '''Write a dict of cluster objects into a pickle file.'''
+
+    logger.debug('writing matches to pickle file %s' % filename)
+
+    handle = open (filename, 'w')
+    pk = pickle.Pickler (handle, pickle.HIGHEST_PROTOCOL)
+    pk.dump (clusters)
+    handle.close()
+
+    logger.debug('wrote %d clusters to pickle file' % len(clusters))
+
+    return
+
+
 def getParms ():                       # use default input sys.argv[1:]
 
-    parser = optparse.OptionParser(usage='%prog [options] <SAM_file> ... ')
+    parser = optparse.OptionParser(usage='%prog [options] <SAM_file> ... ', version=VERSION)
 
-    parser.add_option ('--gtf',       help='annotations in gtf format')
-    parser.add_option ('--gtfpickle', help='annotations in pickled gtf format')
+    parser.add_option ('--gtf',       help='annotations file, in format specified by --format')
+    parser.add_option ('--format',    help='annotations in alternate gtf format (def: %default)', \
+                           type='choice', choices=['standard', 'alt', 'pickle'])
     parser.add_option ('--clusters',  help='cluster_report.csv file name (optional)')
+    parser.add_option ('--outpickle', help='matches in pickle format (optional)')
 
     parser.set_defaults (gtf=None,
-                         gtfpickle=None,
+                         format='standard',
                          clusters=None,
+                         outpickle=None,
                          )
 
     opt, args = parser.parse_args()
