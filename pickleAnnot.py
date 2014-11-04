@@ -12,7 +12,7 @@ import cPickle as pickle
 from tt_log import logger
 import Annotations as anno
 
-VERSION = '20141014.01'
+VERSION = '20141104.01'
 
 def main ():
 
@@ -23,19 +23,13 @@ def main ():
     # Reading a pickled file and repickling it doesn't make sense. But one day it will...
 
     if opt.format == 'pickle':
-        handle = open (opt.gtf, 'r')
-        pk = pickle.Unpickler (handle)
-        annotList = pk.load()
-        handle.close()
+        annotList   = anno.AnnotationList.fromPickle (opt.gtf)
     elif opt.format == 'alt':
         annotList   = anno.AnnotationList (opt.gtf, altFormat=True)
     else:
         annotList   = anno.AnnotationList (opt.gtf)
 
-    handle = open (opt.output, 'w')
-    pk = pickle.Pickler (handle, pickle.HIGHEST_PROTOCOL)
-    pk.dump (annotList)
-    handle.close()
+    annotList.toPickle(opt.output)
 
     logger.debug('finished')
 

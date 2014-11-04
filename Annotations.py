@@ -5,16 +5,17 @@
 import os
 import sys
 import re                       # for regular expressions
+import cPickle as pickle
+
 from tt_log import logger
 
-VERSION = '20140930.01'
+VERSION = '20141104.01'
+logger.debug('version %s loaded' % VERSION)
 
 class Annotation (object):
 
     def __init__ (self, start, end, strand, name):
-        '''
-        Annotation file data about a gene, transcript, or exon.
-        '''
+        '''Annotation file data about a gene, transcript, or exon.'''
 
         self.start  = start
         self.end    = end
@@ -33,8 +34,8 @@ class Annotation (object):
     def updateStartEnd (self, start, end):
         '''
         With alternative format GTF annotation files, the start and
-        end coordinates of genes and transcripts must be infered from
-        the exons entries. This method adjusts them given new information.
+        end coordinates of genes and transcripts must be inferred from
+        the exon entries. This method adjusts them given new information.
         '''
 
         if self.start > start:
@@ -107,6 +108,9 @@ class AnnotationList (object):
         # a bit more clumsy. So all I've done is call one of two
         # methods out of the constructor, based on a flag passed by
         # the caller.
+
+        # Note that there is a thrid way to create an AnnotationList
+        # object: See AnnotationList.fromPickle below.
 
         self.filename = filename
         self.annot    = dict()       # this is the stuff! key=chr value=top-level Annotation object for chr
@@ -243,11 +247,10 @@ class AnnotationList (object):
 
             if type == 'exon':
 
-                geneName = re.search(regexGene, attrs).group(1)
-                tranName = re.search(regexTran, attrs).group(1)
-                tranID   = re.search(regexTID,  attrs).group(1)
-                exonNum  = int(re.search(regexExon, attrs).group(1))
-                exonName = '%s/%d' % (tranName, exonNum)     # exons don't have names: make one up
+                match = re.search(regexGene, attrs)
+                if match is None:
+                    raise RuntimeError ('no gene_name field in %s' % line)
+                geneName = match.group(1)
 
                 if geneEnt is None or geneName != geneEnt.name:
                     geneEnt = Annotation (start, end, strand, geneName)
@@ -256,6 +259,20 @@ class AnnotationList (object):
                 else:
                     geneEnt.updateStartEnd (start, end)       # expand start/end coords of current gene
                     
+                # Capture transcript_name and transcript_id if they
+                # both exist, otherwise take whichever we find.
+
+                matchName = re.search(regexTran, attrs)
+                matchID   = re.search(regexTID,  attrs)
+                if matchID is not None:
+                    tranID   = matchID.group(1)
+                    tranName = matchName.group(1) if matchName is not None else tranID
+                elif matchName is not None:
+                    tranName = matchName.group(1)
+                    tranID   = tranName
+                else:
+                    raise RuntimeError ('no transcript_name/transcript_id field in %s' % line)
+
                 if tranEnt is None or tranName != tranEnt.name:
                     tranEnt = Annotation (start, end, strand, tranName)
                     tranEnt.ID     = tranID                   # only transcripts have ID and length attributes
@@ -267,8 +284,15 @@ class AnnotationList (object):
 
                 tranEnt.length += end - start + 1             # add this exon to total transcript length
                     
-                if exonNum != tranEnt.numChildren() + 1:
-                    raise RuntimeError ('transcript name %s exons out of sequence' % (tranName))
+                matchExon = re.search(regexExon, attrs)
+                if matchExon is not None:
+                    exonNum = int(matchExon.group(1))
+                    if exonNum != tranEnt.numChildren() + 1:
+                        raise RuntimeError ('transcript name %s exons out of sequence' % (tranName))
+                else:
+                    exonNum = tranEnt.numChildren() + 1
+
+                exonName = '%s/%d' % (tranName, exonNum)     # exons don't have names: make one up
 
                 exonEnt = Annotation (start, end, strand, exonName)
                 tranEnt.addChild(exonEnt)
@@ -282,6 +306,30 @@ class AnnotationList (object):
         handle.close()
 
         logger.debug('read %d genes, %d transcripts, %d exons' % (numGenes, numTrans, numExons))
+
+        return
+
+    @staticmethod
+    def fromPickle (filename):
+        '''Create an AnnotationList object from a pickle file (alternative to __init__).'''
+
+        logger.debug('reading annotations in pickle format from %s' % filename)
+
+        handle = open (filename, 'r')
+        pk = pickle.Unpickler (handle)
+        annotList = pk.load()
+        handle.close()
+
+        return annotList
+
+    def toPickle (self, filename):
+
+        pickHandle = open (filename, 'w')
+        pk = pickle.Pickler (pickHandle, pickle.HIGHEST_PROTOCOL)
+        pk.dump (self)
+        pickHandle.close()
+
+        logger.debug('wrote annotation data to pickle file %s' % filename)
 
         return
 

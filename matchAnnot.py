@@ -23,13 +23,14 @@ import ClusterReport as clrep
 import CigarString   as cs
 import PolyA
 
-VERSION = '20141015.01'
+VERSION = '20141029.01'
 
 FLAG_NOT_ALIGNED = 0x04         # SAM file flags
 FLAG_REVERSE     = 0x10
 FLAG_SECONDARY   = 0x100
 
-POLYA_REACH      = 30           # how far from 3' end to look for poly-A motif
+POLYA_REACH = 30                # how far from 3' end to look for poly-A motif
+CL_PER_LINE = 6                 # number of cluster IDs per cl: line
 
 def main ():
 
@@ -41,14 +42,11 @@ def main ():
         clusterList = clrep.ClusterList (opt.clusters)     # read the cluster_report.csv file, if supplied
 
     if opt.format == 'pickle':
-        handle = open (opt.gtf, 'r')
-        pk = pickle.Unpickler (handle)
-        annotList = pk.load()
-        handle.close()
+        annotList = anno.AnnotationList.fromPickle (opt.gtf)
     elif opt.format == 'alt':
-        annotList   = anno.AnnotationList (opt.gtf, altFormat=True)
-    else:
-        annotList   = anno.AnnotationList (opt.gtf)
+        annotList = anno.AnnotationList (opt.gtf, altFormat=True)
+    else:     # standard format
+        annotList = anno.AnnotationList (opt.gtf)
 
     annotCursor = anno.AnnotationCursor (annotList)
 
@@ -72,7 +70,7 @@ def main ():
     totByScore = [0,0,0,0,0,0]    # indexed by score
     totSplice  = [0,0,0,0,0,0]
 
-    clusterDict = dict()          # annotation matches saved for later pickling
+    clusterDict = cl.ClusterDict()          # annotation matches saved for later pickling
     lastPos = dict()              # current position in SAM file by chr (for sort check)
 
     for line in handle:           # main loop: read the SAM file
@@ -118,6 +116,10 @@ def main ():
 
         exons = cigar.exons (start)
 
+        if opt.outpickle is not None:
+            myCluster = cl.Cluster(clusterName, flags, chr, start, strand, cigarString, bases)
+            clusterDict.addCluster (myCluster)
+
         print '\nisoform:  %-16s    %9d                    %9d         %-5s  %s  %6d   %dS+%dS' \
             % (clusterName, start, end, chr, strand, end-start, cigar.leading, cigar.trailing),
         if flags & FLAG_SECONDARY:
@@ -125,7 +127,7 @@ def main ():
             totMulti += 1
         print
 
-        print 'cigar:    %s' % cigarString
+        print 'cigar:    %s' % cigar.prettyPrint()
 
         if opt.clusters is not None:                     # print cluster (cl:) lines
             printClusterReads (clusterList, clusterName)
@@ -171,9 +173,10 @@ def main ():
         else:
 
             bestGene, bestTran = bestHit.which
-            print 'result:   %-50s  %-20s  %-24s  ex: %2d  sc: %d' % (clusterName, bestGene.name, bestTran.name, len(exons), bestHit.value),
+            print 'result:   %-50s  %-20s  %-24s  ex: %2d  sc: %d' \
+                % (clusterName, bestGene.name, bestTran.name, len(exons), bestHit.value),
 
-            if bestGene.strand != strand:                                   # if best hit was on other strand from alignment
+            if bestGene.strand != strand:                                # if best hit was on other strand from alignment
                 print 'rev',
                 totReverse += 1
 
@@ -188,11 +191,11 @@ def main ():
             if foundPolyA:
                 totSplice[bestHit.value] += 1
 
-        if opt.outpickle is not None:
-            clusterDict[clusterName] = cl.Cluster(clusterName, flags, chr, start, strand, cigarString, bases)
+            if opt.outpickle is not None:
+                myCluster.best(bestGene, bestTran, bestScore)            # keep track of best gene in pickle object
 
     if opt.outpickle is not None:
-        writePickle (opt.outpickle, clusterDict)         # save matches as pickle file
+        clusterDict.toPickle (opt.outpickle)                             # save matches as pickle file
 
     print  '\nsummary: version %s\n' % VERSION
 
@@ -485,8 +488,8 @@ def printClusterReads (clusterList, clusterName):
     clusterID = re.search('(c\d+)', clusterName).group(1)      # isoform name format varies, but cnnnn should be in there somewhere
     for FL, cellNo, reads in clusterList.showReads(clusterID):
         flag = 'cl-FL:' if FL == 'FL' else 'cl-nfl:'           # shorten 'nonFL' to 'nfl'
-        for ix in xrange(0,len(reads),8):                      # print 8 reads to the line
-            print '%-7s   %2d  ' % (flag, cellNo), '  '.join(['%-16s' % x for x in reads[ix:ix+8] ])
+        for ix in xrange(0,len(reads),CL_PER_LINE):            # print N reads to the line
+            print '%-7s   %2d  ' % (flag, cellNo), '  '.join(['%-16s' % x for x in reads[ix:ix+CL_PER_LINE] ])
 
 
 def writePickle (filename, clusters):

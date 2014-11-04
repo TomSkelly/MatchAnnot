@@ -7,6 +7,9 @@ import sys
 import re                       # for regular expressions
 from tt_log import logger
 
+VERSION = '20141103.01'
+logger.debug('version %s loaded' % VERSION)
+
 regexFields   = re.compile('(\d+)([MNDISH])')
 regexLeading  = re.compile('^(\d+)S')
 regexTrailing = re.compile('(\d+)S$')
@@ -42,6 +45,27 @@ class CigarString (object):
 
         match = re.search(regexTrailing, self.string)
         self.trailing = int(match.group(1)) if match is not None else 0
+
+    def prettyPrint (self):
+        '''Separate cigar fields into exons and introns.'''
+
+        fields  = list()
+        filling = False
+
+        for count, op in self.cfields:
+
+            if filling:                         # if we're currently concatenating
+                if op in 'SN':                  # if this should be a new field
+                    fields.append(count+op)
+                    filling = False             # S & N should stand alone
+                else:
+                    fields[-1] += count+op      # add to existing field
+            else:
+                fields.append(count+op)         # start a new field
+                if op not in 'SN':              # and add subsequent matches to it
+                    filling = True
+
+        return ' '.join(fields)
 
     def genomicLength (self):
         '''Compute the number of bases of the total genomic reference covered by this read.'''

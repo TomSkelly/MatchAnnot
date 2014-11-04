@@ -7,6 +7,9 @@ import sys
 import re                       # for regular expressions
 from tt_log import logger
 
+VERSION = '20141029.01'
+logger.debug('version %s loaded' % VERSION)
+
 class ClusterList (object):
     
     def __init__ (self, filename):
@@ -45,10 +48,10 @@ class ClusterList (object):
 
         handle.close()
 
-        logger.debug('read %d clusters from %d cells' % (self.numClusters, self.numCells))
+        logger.debug('read %d reads in %d clusters from %d cells' % (self.numClusters, len(self.clusters), self.numCells))
 
     def showReads (self, clusterID):
-        '''Generator function returns all reads for a spccified cluster.'''
+        '''Generator function returns all reads for a specified cluster.'''
 
         clusterEnt = self.clusters[clusterID]
 
