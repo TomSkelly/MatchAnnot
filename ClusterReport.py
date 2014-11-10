@@ -27,13 +27,19 @@ class ClusterList (object):
         regexCCS = re.compile ('_CCS$')
 
         handle = open (filename, 'r')
-        handle.readline()            # skip header line
+        header = handle.readline().strip()            # get header line
+
+        newStyle = header == 'cluster_id,read_id,read_type'       # is field separator space (old) or comma (new)?
 
         for line in handle:
 
             self.numClusters += 1
 
-            clusterID, readName, FL = line.strip().split()
+            if newStyle:
+                clusterID, readName, FL = line.strip().split(',')
+            else:
+                clusterID, readName, FL = line.strip().split()
+
             cell, ZMW, coords = readName.split('/')
             coords = re.sub (regexCCS, '', coords)          # get rid of '_CCS' at end of read range
             shortName = ZMW + '|' + coords
