@@ -1,0 +1,23 @@
+
+MatchAnnot is easy to install. The package includes top-level
+executable python scripts, and supporting python modules. All of those
+reside in a single python directory. All you need to do is download
+the MatchAnnot .zip file from github and unzip it, to create a
+directory called MatchAnnot-master containing the scripts and modules.
+
+The executable scripts (currently including matchAnnot.py and
+clusterView.py) should be findable via the $PATH environment
+variable, e.g.:
+
+    export PATH=$PATH:~/MatchAnnot-master
+
+They can then be run from the command line. The modules they require
+will be found automatically, because they reside in the same
+directory.
+
+Try running with the --help option to see what command line parameters
+are available.
+
+If the magic as described here doesn't work for you, please let me know.
+
+-- Tom Skelly (thomas.skelly@fnlcr.nih.gov)
