@@ -53,6 +53,14 @@ class Annotation (object):
         the incoming data.
         '''
 
+        # The sort at the bottom of this block looks a little
+        # scary. But the 500 sorts required to process the
+        # out-of-sequence entries on chrY in the GENCODE19 gtf file
+        # take only ~150 msec. It would be nice to sort only once, at
+        # the end -- but the Annotation object doesn't know when the
+        # end has arrived. It has to keep itself consistent after
+        # every call to addChild.
+
         if self.children == None:
             self.children = [child]
         elif child.start >= self.children[-1].start:
@@ -61,10 +69,10 @@ class Annotation (object):
             self.children.insert(0, child)
         else:
 ####            raise RuntimeError('out of sequence: %s' % child.name)
-            logger.debug('out of sequence: %s' % child.name)
+####            logger.debug('out of sequence: %s' % child.name)
             self.children.append(child)
-            self.children.sort()           # this better not happen very often !
-
+            self.children.sort(key=lambda x: x.start)
+            
     def getChildren (self):
         '''Generator function to return children, which are Annotation objects themselves, one by one.'''
 
