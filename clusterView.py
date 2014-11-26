@@ -18,9 +18,10 @@ import Best        as best
 import Cluster     as cl
 import CigarString as cs
 
-VERSION = '20141104.01'
+VERSION = '20141125.01'
 
 DEF_OUTPUT = 'exons.png'        # default plot filename
+DEF_YSCALE = 1.0                # default  Y-axis scale factor
 
 FIG_WIDTH = 14
 FIG_HEIGHT_PER_TRANS = 0.2      # figure height depends on the number of rows
@@ -45,21 +46,34 @@ def main ():
     if len(exonList) == 0:
         raise RuntimeError ('no exons found for gene %s in annotation or match files' % opt.gene)
 
-    exonList.sort(key=lambda x: x.start)         # sort the list by start position
-
-    blocks = assignBlocks (opt, exonList)        # assign each exon to a block
+    forwardStrand = '-' if opt.flip else '+'
+    if exonList[0].strand == forwardStrand:
+        exonList.sort(key=lambda x: x.start)               # sort the list by start position
+        blocks = assignBlocks (opt, exonList)              # assign each exon to a block
+    else:
+        exonList.sort(key=lambda x: x.end, reverse=True)   # sort the list by decreasing end position
+        blocks = assignBlocksReverse (opt, exonList)       # assign each exon to a block -- backwards
 
     tranNames = orderTranscripts (tranList)      # set Y-axis coords for the transcripts
 
-    plt.figure (figsize=(FIG_WIDTH, int(FIG_HEIGHT_PER_TRANS*len(tranList))))
+    plt.figure (figsize=(FIG_WIDTH, int(FIG_HEIGHT_PER_TRANS*len(tranList)*opt.yscale)))
 
     plotExons (exonList, blocks)                 # plot the exons
 
+    plotStartStop (tranList, blocks)             # start/stop  codons to plot
+
     plotBoundaries (tranNames, blocks)           # plot block boundaries as vertical lines
 
-    plt.title ('transcripts for gene %s' % opt.gene)
+    if opt.title is not None:
+        plt.title (opt.title)
+    else:
+        plt.title ('transcripts for gene %s' % opt.gene)
+
     plt.savefig (opt.output)
     plt.close()
+
+    if opt.details is not None:
+        printDetails (opt, blocks, exonList)
 
     logger.debug('finished')
 
@@ -88,11 +102,19 @@ def getGeneFromAnnotation (opt, tranList, exonList):
     myGene = geneList[0]
 
     for tran in myGene.getChildren():                       # tran is an Annotation object
-        myTran = Transcript(tran.name)
+
+        myTran = Transcript(tran.name, annot=True)
+
+        if hasattr(tran, 'startcodon'):
+            myTran.startcodon = tran.startcodon
+        if hasattr(tran, 'stopcodon'):
+            myTran.stopcodon = tran.stopcodon
+
         for exon in tran.getChildren():                     # exon is an Annotation object
-            myExon = Exon(myTran, exon.name, exon.start, exon.end, exon.strand, annot=True)
+            myExon = Exon(myTran, exon.name, exon.start, exon.end, exon.strand)
             exonList.append (myExon)
             myTran.exons.append(myExon)
+
         tranList.append (myTran)
 
     return tranList, exonList
@@ -147,15 +169,16 @@ def getGeneFromMatches (opt, tranList, exonList):
     return tranList, exonList
 
 def assignBlocks (opt, exonList):
-    '''Assign exons to blocks, separated by sequence which is intronic in all transcripts.'''
+    '''
+    Assign exons to blocks, separated by sequence which is intronic in
+    all transcripts. exonList is assumed to be sorted by ascending
+    start position.
+    '''
 
     adjust  = 0
     blockNo = 0
     exonIx  = 0
     blocks = list()
-
-    if opt.details is not None:
-        handle = open (opt.details, 'w')
 
     while exonIx < len(exonList):               # can't use enumerate here, it's a double loop
 
@@ -169,25 +192,49 @@ def assignBlocks (opt, exonList):
                 blockEnd = myExon.end
             myExon.block = blockNo
             myExon.tran.blocks.add(blockNo)    # transcript has an exon in this block
-            myExon.adjStart = myExon.start-blockStart+adjust
+            myExon.adjStart = myExon.start - blockStart + adjust
             exonIx += 1
 
-        blockSize = blockEnd-blockStart+1
-
-        if opt.details is not None:            # print details of 
-            handle.write ('\nblock %d (%d):\n' % (blockNo, blockSize))
-            for myExon in exonList[blockStartIx:exonIx]:
-                exonSize = myExon.end-myExon.start+1
-                handle.write ('    %-32s  %s  %9d  %9d  %5d  %5d  %d\n' \
-                    % (myExon.name, myExon.strand, myExon.start, myExon.end, \
-                           exonSize, myExon.adjStart, myExon.adjStart+exonSize))
-
-        adjust += blockSize
-        blocks.append(Block(blockStart, adjust))
+        adjust += blockEnd - blockStart + 1
+        blocks.append(Block(blockStart, blockEnd, adjust))
         blockNo += 1
 
-    if opt.details is not None:
-        handle.close()
+    return blocks
+
+def assignBlocksReverse (opt, exonList):
+    '''
+    Like assignblocks, but for the reverse strand, ordering blocks
+    from the 5' end of the transcript. exonList is assumed to be
+    sorted by decreasing exon end position.
+    '''
+
+    # I did this as a separate mirror image of assignBlocks, rather
+    # than clutter the scenery with lots of forward/reverse checks.
+
+    adjust  = 0
+    blockNo = 0
+    exonIx  = 0
+    blocks = list()
+
+    while exonIx < len(exonList):               # can't use enumerate here, it's a double loop
+
+        blockStart = exonList[exonIx].end       # block start = end of last exon in block
+        blockEnd   = exonList[exonIx].start     # initial value, updated in the loop below
+        blockStartIx = exonIx
+
+        while exonIx < len(exonList) and exonList[exonIx].end >= blockEnd:
+
+            myExon = exonList[exonIx]
+            if myExon.start < blockEnd:
+                blockEnd = myExon.start
+            myExon.block = blockNo
+            myExon.tran.blocks.add(blockNo)    # transcript has an exon in this block
+            myExon.adjStart = blockStart - myExon.end + adjust
+            exonIx += 1
+
+        adjust += blockStart - blockEnd + 1
+        blocks.append(Block(blockStart, blockEnd, adjust))
+        blockNo += 1
 
     return blocks
 
@@ -209,6 +256,7 @@ def orderTranscripts (tranList):
     tranNames = list()
     curTran = tranList[0]            # arbitrarily start with the first transcript
     tranIx = 0
+
     while True:                                     # loop until break below
 
         tranNames.append(curTran.name)              # needed for yticks call
@@ -231,19 +279,44 @@ def orderTranscripts (tranList):
 def plotExons (exonList, blocks):
     '''Plot exons.'''
 
-    for exonIx, myExon in enumerate(exonList):
+    for myExon in exonList:
 
         exonSize = myExon.end - myExon.start + 1
         adjStart = myExon.adjStart
 
-        if myExon.annot:
-            plt.hlines (myExon.tran.tranIx+1, adjStart, adjStart+exonSize, linewidth=3, colors='green')
-            blocks[myExon.block].annot = True
+        if myExon.tran.annot:                       # exon from annotation file?
+            color = 'green'
+            blocks[myExon.block].annot = True       # this block includes annotation
         else:
-            if myExon.tran.score == 5:
-                plt.hlines (myExon.tran.tranIx+1, adjStart, adjStart+exonSize, linewidth=3, colors='purple')
-            else:
-                plt.hlines (myExon.tran.tranIx+1, adjStart, adjStart+exonSize, linewidth=3, colors='blue')
+            color = 'purple' if myExon.tran.score == 5 else 'blue'
+
+        plt.hlines (myExon.tran.tranIx+1, adjStart, adjStart+exonSize, linewidth=3, colors=color, zorder=1)
+
+    return
+
+def plotStartStop (tranList, blocks):
+    '''Add start/stop codons to plot.'''
+
+    for tran in tranList:
+        if tran.annot:                             # only annotations know about start/stops
+            if hasattr(tran, 'startcodon'):
+                plotCodon (tran, tran.startcodon, blocks, 'chartreuse')
+            if hasattr(tran, 'stopcodon'):
+                plotCodon (tran, tran.stopcodon, blocks, 'red')
+
+    return
+
+def plotCodon (tran, posit, blocks, color):
+    '''Add a codon mark to the plot.'''
+
+    for blk in blocks:
+
+        if blk.start <= posit and blk.end >= posit or \
+                blk.start >= posit and blk.end <= posit:      # check in both strand directions
+
+            xPos = blk.boundary - abs(blk.end-posit)
+            plt.scatter (xPos, tran.tranIx+1, s=25, c=color, marker='v', zorder=2)
+            break
 
     return
 
@@ -270,11 +343,11 @@ def plotBoundaries (tranNames, blocks):
             labelsStart.append(str(bound.start))
         if len(ticksEnd) == 0 or bound.boundary - ticksEnd[-1] > tickSep:
             ticksEnd.append(bound.boundary)
-            labelsEnd.append(str(bound.start+bound.boundary-frompos-1))
+            labelsEnd.append(str(bound.end))
 
         frompos = bound.boundary       # new block start
 
-    plt.grid(True)
+    plt.grid(axis='y')                     # turn on horizontal dotted lines
     plt.xlim (0, blocks[-1].boundary)
     plt.ylim (len(tranNames)+1, 0)
     plt.xticks (ticksStart, labelsStart, fontsize='xx-small')
@@ -293,7 +366,7 @@ def plotBoundaries (tranNames, blocks):
 
     plt.axes(x2)
 
-    plt.grid(True)
+    plt.grid(axis='y')
     plt.xlim (0, blocks[-1].boundary)
     plt.ylim (len(tranNames)+1, 0)
     plt.xticks (ticksEnd, labelsEnd, fontsize='xx-small')
@@ -301,29 +374,53 @@ def plotBoundaries (tranNames, blocks):
 
     return
 
+def printDetails (opt, blocks, exonList):
+    '''Print numerical details on block occupancy.'''
+
+    exonIx = 0
+    lastBoundary = 0
+
+    handle = open (opt.details, 'w')
+
+    for ix, blk in enumerate(blocks):
+
+        blockSize = blk.boundary - lastBoundary
+        lastBoundary = blk.boundary
+        handle.write ('\nblock %d (%d)  %d  %d:\n' % (ix, blockSize, blk.boundary, blk.start))
+
+        while exonIx < len(exonList) and exonList[exonIx].block == ix:
+            myExon = exonList[exonIx]
+            exonSize = myExon.end-myExon.start+1
+            handle.write ('    %-32s  %s  %9d  %9d  %5d  %5d  %d\n' \
+                              % (myExon.name, myExon.strand, myExon.start, myExon.end, \
+                                     exonSize, myExon.adjStart, myExon.adjStart+exonSize))
+            exonIx += 1
+
+    handle.close()
+
+    return
+
 def getParms ():                       # use default input sys.argv[1:]
 
-    parser = optparse.OptionParser(usage='%prog [options] <fasta_file> ... ')
+    parser = optparse.OptionParser(usage='%prog [options]')
 
-    parser.add_option ('--gtf',       help='annotations file, in format specified by --format (required)')
-    parser.add_option ('--format',    help='format of annotation file (def: %default)', \
+    parser.add_option ('--gtf',     help='annotations file, in format specified by --format (optional)')
+    parser.add_option ('--format',  help='format of annotation file: standard, alt, pickle (def: %default)', \
                            type='choice', choices=['standard', 'alt', 'pickle'])
-    parser.add_option ('--gene',      help='gene to plot (required)')
-    parser.add_option ('--matches',   help='IsoSeq clusters pickle file name (optional)')
-    parser.add_option ('--omit',      help='clusters to ignore, e.g., c1234,c2345,c3456')
-    parser.add_option ('--show',      help='clusters to force shown, even if underpopulated')
-    parser.add_option ('--howmany',   help='how many clusters to plot (def all)', type='int')
-    parser.add_option ('--output',    help='output plot file name (def: %default)')
-    parser.add_option ('--details',   help='output file name for details in text format (def: no output)')
+    parser.add_option ('--matches', help='pickle file from matchAnnot.py (optional)')
+    parser.add_option ('--gene',    help='gene to plot (required)')
+    parser.add_option ('--omit',    help='clusters to ignore, e.g., c1234,c2345,c3456')
+    parser.add_option ('--show',    help='clusters to force shown, even if underpopulated')
+    parser.add_option ('--howmany', help='how many clusters to plot (def: all)', type='int')
+    parser.add_option ('--output',  help='output plot file name (def: %default)')
+    parser.add_option ('--flip',    help='reverse plot orientation (def: mRNA 5\' on left)', action='store_true')
+    parser.add_option ('--yscale',  help='amount by which to scale Y axis (def: %default)', type='float')
+    parser.add_option ('--details', help='output file name for details in text format (def: no output)')
+    parser.add_option ('--title',   help='title for top of figure')
 
-    parser.set_defaults (gtf=None,
-                         format='standard',
-                         gene=None,
-                         matches=None,
-                         omit=None,
-                         show=None,
+    parser.set_defaults (format='standard',
                          output=DEF_OUTPUT,
-                         details=None,
+                         yscale=DEF_YSCALE,
                          )
 
     opt, args = parser.parse_args()
@@ -334,10 +431,11 @@ def getParms ():                       # use default input sys.argv[1:]
 class Transcript (object):
     '''Just a struct actually, containing data about a transcript.'''
 
-    def __init__ (self, name, score=None):
+    def __init__ (self, name, score=None, annot=False):
         
         self.name   = name
         self.score  = score
+        self.annot  = annot            # transcript comes from annotations?
         self.tranIx = None             # y-axis coordinate of transcript
         self.blocks = set()            # blocks where this transcript has exon(s)
         self.exons  = list()           # Exon objects for this transcript
@@ -346,14 +444,13 @@ class Transcript (object):
 class Exon (object):
     '''Struct containing data about an exon.'''
 
-    def __init__ (self, tran, name, start, end, strand, annot=False):
+    def __init__ (self, tran, name, start, end, strand):
 
         self.tran     = tran           # Transcript object containing this exon
         self.name     = name
         self.start    = start
         self.end      = end
         self.strand   = strand
-        self.annot    = annot          # exon comes from annotations?
         self.block    = None           # block number where this exon resides
         self.adjStart = None           # start of exon in phony x-axis coordinates
 
@@ -369,9 +466,10 @@ class Block (object):
     # one implication of that scheme is that the x axis of the plot is
     # meaningless: it represents neither genomic nor RNA sequence range.
 
-    def __init__ (self, start, boundary):
+    def __init__ (self, start, end, boundary):
 
         self.start    = start          # actual genomic start coord
+        self.end      = end            # actual genomic end coord
         self.boundary = boundary       # right-hand boundary x-coord in phony space
         self.annot    = False          # block contains annotation exons?
 
