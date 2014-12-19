@@ -6,6 +6,7 @@ import os
 import sys
 import optparse
 import re        # regular expressions
+import string
 
 from tt_log import logger
 
@@ -18,7 +19,7 @@ import Best        as best
 import Cluster     as cl
 import CigarString as cs
 
-VERSION = '20141125.01'
+VERSION = '20141219.01'
 
 DEF_OUTPUT = 'exons.png'        # default plot filename
 DEF_YSCALE = 1.0                # default  Y-axis scale factor
@@ -26,6 +27,12 @@ DEF_YSCALE = 1.0                # default  Y-axis scale factor
 FIG_WIDTH = 14
 FIG_HEIGHT_PER_TRANS = 0.2      # figure height depends on the number of rows
 MAX_LABELS = 20                 # how many labels fit across the X axis
+EXTRA_SPACE = 1.0               # added vertical space in figure for labels, etc
+
+FASTA_WRAP = 60                 # bases per fasta line
+
+REGEX_NAME = re.compile ('(c\d+)')      # cluster ID in cluster name
+COMPLTAB   = string.maketrans ('ACGT', 'TGCA')         # for reverse-complementing reads
 
 def main ():
 
@@ -56,7 +63,11 @@ def main ():
 
     tranNames = orderTranscripts (tranList)      # set Y-axis coords for the transcripts
 
-    plt.figure (figsize=(FIG_WIDTH, int(FIG_HEIGHT_PER_TRANS*len(tranList)*opt.yscale)))
+    vertSize = int(FIG_HEIGHT_PER_TRANS * len(tranList) * opt.yscale + EXTRA_SPACE)
+    margin = EXTRA_SPACE / vertSize / 2.0
+    plt.figure (figsize=(FIG_WIDTH, vertSize))
+    plt.subplots_adjust (top=1.0-margin, bottom=margin, left=0.13)
+    plt.subplot (111)
 
     plotExons (exonList, blocks)                 # plot the exons
 
@@ -125,20 +136,19 @@ def getGeneFromMatches (opt, tranList, exonList):
     if opt.matches == None:
         return tranList, exonList
 
-    regex = re.compile ('(c\d+)')                                      # regex for cluster ID
     omits = [] if opt.omit is None else opt.omit.split(',')            # clusters which must not be included
     shows = [] if opt.show is None else opt.show.split(',')            # clusters which must be included
 
     localList = list()                                                 # temporary list of clusters
     totClusters = 0
 
-    clusterDict = cl.ClusterDict.fromPickle (opt.matches)
+    clusterDict = cl.ClusterDict.fromPickle (opt.matches)              # pickle file produced by matchAnnot.py
 
     for cluster in clusterDict.getClustersForGene(opt.gene):           # cluster is Cluster object
 
         totClusters += 1
 
-        match = re.search (regex, cluster.name)
+        match = re.search (REGEX_NAME, cluster.name)
         if match is not None and match.group(1) in shows:              # if this is a force-include cluster
             localList.append ( [cluster, 'f999999p999999'] )           # fake sort key to push it to the front
         elif match is None or match.group(1) not in omits:
@@ -164,7 +174,10 @@ def getGeneFromMatches (opt, tranList, exonList):
 
         tranList.append (myTran)
 
-    logger.debug('kept %d of %d clusters' % (len(localList), totClusters))
+        if opt.fasta is not None:
+            writeFasta (opt, cluster)
+
+    logger.debug('kept %d of %d clusters for gene %s' % (len(localList), totClusters, opt.gene))
 
     return tranList, exonList
 
@@ -315,7 +328,7 @@ def plotCodon (tran, posit, blocks, color):
                 blk.start >= posit and blk.end <= posit:      # check in both strand directions
 
             xPos = blk.boundary - abs(blk.end-posit)
-            plt.scatter (xPos, tran.tranIx+1, s=25, c=color, marker='v', zorder=2)
+            plt.scatter (xPos, tran.tranIx+1, s=25, c=color, marker='v', zorder=2)    # zorder: put codons on top of lines
             break
 
     return
@@ -400,6 +413,37 @@ def printDetails (opt, blocks, exonList):
 
     return
 
+def writeFasta (opt, cluster):
+    '''Write a fasta file for a cluster.'''
+
+    # It's fairly common to want to see the sequence for interesting
+    # clusters in fasta format. It's convenient to build that into
+    # clusterView, since the logic for picking the most populous (or
+    # otherwise interesting) clusters is already here.
+
+    if not os.path.exists (opt.fasta):
+        os.makedirs (opt.fasta)
+    elif not os.path.isdir (opt.fasta):
+        raise RuntimeError ('%s exists but is not a directory' % opt.fasta)
+
+    match = re.search (REGEX_NAME, cluster.name)
+    if match is None:
+        raise RuntimeError ('cannot find cluster ID in %s' % cluster.name)
+
+    if cluster.strand == '+':     # Cluster object includes bases in forward strand sense
+        bases = cluster.bases
+    else:
+        bases = cluster.bases[::-1].translate(COMPLTAB)     # fasta file wants them in read sense
+
+    filename = '%s/%s.fasta' % (opt.fasta, match.group(1))
+    handle = open (filename, 'w')
+    handle.write ('>%s\n' % cluster.name)
+
+    for ix in xrange(0, len(bases), FASTA_WRAP):
+        handle.write (bases[ix:ix+FASTA_WRAP] + '\n')
+
+    handle.close()
+
 def getParms ():                       # use default input sys.argv[1:]
 
     parser = optparse.OptionParser(usage='%prog [options]')
@@ -416,6 +460,7 @@ def getParms ():                       # use default input sys.argv[1:]
     parser.add_option ('--flip',    help='reverse plot orientation (def: mRNA 5\' on left)', action='store_true')
     parser.add_option ('--yscale',  help='amount by which to scale Y axis (def: %default)', type='float')
     parser.add_option ('--details', help='output file name for details in text format (def: no output)')
+    parser.add_option ('--fasta',   help='output directory for fasta files for chosen clusters (def: no output)')
     parser.add_option ('--title',   help='title for top of figure')
 
     parser.set_defaults (format='standard',
