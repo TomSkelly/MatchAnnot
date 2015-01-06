@@ -23,7 +23,7 @@ import ClusterReport as clrep
 import CigarString   as cs
 import PolyA
 
-VERSION = '20141029.01'
+VERSION = '20141230.01'
 
 FLAG_NOT_ALIGNED = 0x04         # SAM file flags
 FLAG_REVERSE     = 0x10
@@ -54,6 +54,7 @@ def main ():
 
     regexAS = re.compile('(AS:i:\d+)')       # alignment score
     regexUT = re.compile('(uT:A:\d+)')       # mismatch reason (ToDo: Translate this)
+    regexMD = re.compile('MD:Z:(\S+)')       # MD string
 
     if len(args) > 0:
         logger.debug('reading SAM file %s' % args[0])
@@ -105,10 +106,14 @@ def main ():
 
         totAlign += 1
 
-        strand = '-' if (flags & FLAG_REVERSE) else '+'
-        cigar = cs.CigarString(cigarString)
+        match = re.search(regexMD, line)
+        if match is not None:                         # if  MD string is present
+            cigar = cs.CigarString(cigarString, match.group(1))
+        else:
+            cigar = cs.CigarString(cigarString)
+
         start = int(start)
-        end   = start + cigar.genomicLength() - 1;       # -1 to report last base, rather than last+1
+        end   = start + cigar.genomicLength() - 1;    # -1 to report last base, rather than last+1
 
         if start < lastPos.get(chr, 0):
             raise RuntimeError ('SAM file is not sorted by position')
@@ -116,18 +121,22 @@ def main ():
 
         exons = cigar.exons (start)
 
+        strand = '-' if (flags & FLAG_REVERSE) else '+'
+
         if opt.outpickle is not None:
             myCluster = cl.Cluster(clusterName, flags, chr, start, strand, cigarString, bases)
             clusterDict.addCluster (myCluster)
 
-        print '\nisoform:  %-16s    %9d                    %9d         %-5s  %s  %6d   %dS+%dS' \
-            % (clusterName, start, end, chr, strand, end-start, cigar.leading, cigar.trailing),
+        print '\nisoform:  %-16s    %9d                    %9d         %-5s  %s  %6d' \
+            % (clusterName, start, end, chr, strand, end-start),
         if flags & FLAG_SECONDARY:
             print ' multimap',
             totMulti += 1
         print
 
         print 'cigar:    %s' % cigar.prettyPrint()
+        if cigar.MD is not None:
+            print 'MD:       %s' % cigar.MD
 
         if opt.clusters is not None:                     # print cluster (cl:) lines
             printClusterReads (clusterList, clusterName)
@@ -459,18 +468,23 @@ def printMatchingExons (ixR, ixT, exonR, exonT):
                exonR.start, exonT.start, exonT.start-exonR.start, \
                exonR.end,   exonT.end,   exonT.end-exonR.end, \
                exonR.end-exonR.start+1,  exonT.end-exonT.start+1, \
-               exonR.inserts, exonR.deletes),  # comma: line continued below
-
+               exonR.inserts, exonR.deletes),
+    if hasattr (exonR, 'substs'):
+        print ' sub: %2d' % exonR.substs,  # comma: line continued in printStartStop
 
 def printReadExon (ixR, exonR):
+    '''Print read exon which has no matching transcript exon.'''
 
     print 'exon:                %2d   .   %9d          .      .  %9d          .      .      len: %4d    .  ins: %2d  del: %2d' \
-        % (ixR+1, exonR.start, exonR.end, exonR.end-exonR.start+1, exonR.inserts, exonR.deletes)        # no comma: EOL here
+        % (ixR+1, exonR.start, exonR.end, exonR.end-exonR.start+1, exonR.inserts, exonR.deletes),
+    if hasattr (exonR, 'substs'):
+        print ' sub: %2d' % exonR.substs        # no comma: EOL here
 
 def printTranExon (ixT, exonT):
+    '''Print transcript exon which has no matching read exon.'''
 
     print 'exon:                 .  %2d           .  %9d      .          .  %9d      .      len:    . %4d' \
-        % (ixT+1, exonT.start, exonT.end, exonT.end-exonT.start+1),  # comma: line continued below
+        % (ixT+1, exonT.start, exonT.end, exonT.end-exonT.start+1),  # comma: line continued in printStartStop
 
 def printStartStop (tranExons, exonT):
 
