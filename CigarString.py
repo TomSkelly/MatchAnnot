@@ -8,10 +8,13 @@
 import os
 import sys
 import re                       # for regular expressions
+import math
 from tt_log import logger
 
-VERSION = '20150105.01'
+VERSION = '20150121.01'
 logger.debug('version %s loaded' % VERSION)
+
+DEF_Q = 50.0                    # Q score for error-free exon
 
 regexFields   = re.compile('(\d+)([MNDISH])')
 regexLeading  = re.compile('^(\d+)S')
@@ -38,6 +41,22 @@ class Exon (object):
         else:
             return self.end < other.end
 
+    def QScore (self):
+        '''Compute Q score for THIS exon.'''
+
+        if not hasattr (self, 'substs'):
+            Q = 0.0            # no MD string was supplied, can't compute Q score
+        else:
+
+            errors = self.substs + self.inserts + self.deletes
+
+            if (errors == 0):
+                Q = DEF_Q
+            else:
+                length = self.end - self.start + 1
+                Q = -10.0 * math.log10( float(errors) / float(length) )
+
+        return Q
 
 class CigarString (object):
 
@@ -180,15 +199,20 @@ class CigarString (object):
         readIx = 0                     # index into the read
         cursor = self.exonList[0].end - self.exonList[0].start + 1   # # of bases described by MD string so far
 
-        while strIx < len(MD) and not MD[strIx:].isdigit():          # step through the MD string, quit when only matches remain
+        while strIx < len(MD) and not MD[strIx:].isdigit():          # step through the MD string, ...
+                                                                     #    quit when only matches remain
 
-            match = regexDigits.match(MD, strIx)     # at this point, we're expecting a field length
-            if match is None:
-                raise RuntimeError ('expected field length in MD string %s at %d' % (MD, strIx))
+            # At this point, we're expecting a field length. But in
+            # the case of two adjacent substitutions, some aligners
+            # cheat: rather than 123A0C0T, they produce 123ACT. We
+            # cope with that by doing nothing. I've added a unit test
+            # case for this.
 
-            fieldLen = match.group(1)
-            readIx += int(fieldLen)
-            strIx += len(fieldLen)
+            match = regexDigits.match(MD, strIx)
+            if match is not None:
+                fieldLen = match.group(1)
+                readIx += int(fieldLen)
+                strIx += len(fieldLen)
 
             while cursor <= readIx:             # bump to exon containing the error
                 exonIx += 1
@@ -222,8 +246,9 @@ class CigarString (object):
 def unitTest ():
 
     testcases = ( ['100M100N100M', '200', [0,0] ],
-                  ['10M4D20M100N10M', '10^ACGT10T9c', [1,1] ],
+                  ['10M4D20M100N10M', '10^ACGT10T9c9', [1,1] ],
                   ['20M100N20M100N20M100N20M', '10t49C4C4C4c0c0c2', [1,0,0,6] ],
+                  ['100M100N80M3D20M', '50ACT97TCA27^TTT0T19', [3,4] ],
                   )
 
     start = 100000
