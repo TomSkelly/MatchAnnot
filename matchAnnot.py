@@ -23,7 +23,7 @@ import ClusterReport as clrep
 import CigarString   as cs
 import PolyA
 
-VERSION = '20141230.01'
+VERSION = '20150126.01'
 
 FLAG_NOT_ALIGNED = 0x04         # SAM file flags
 FLAG_REVERSE     = 0x10
@@ -82,6 +82,8 @@ def main ():
         totReads += 1
 
         lineFields = line.split('\t')                          # just split it once, not 6 times in list comp
+        if len(lineFields) < 10:
+            raise RintimeError ('mis-formed SAM line: %s' % line)
         clusterName, flags, chr, start, cigarString, bases = [lineFields[i] for i in (0,1,2,3,5,9)]
         flags = int(flags)
 
@@ -124,7 +126,7 @@ def main ():
         strand = '-' if (flags & FLAG_REVERSE) else '+'
 
         if opt.outpickle is not None:
-            myCluster = cl.Cluster(clusterName, flags, chr, start, strand, cigarString, bases)
+            myCluster = cl.Cluster(clusterName, flags, chr, start, strand, cigar, bases)    # cigar is a cigarString object
             clusterDict.addCluster (myCluster)
 
         print '\nisoform:  %-16s    %9d                    %9d         %-5s  %s  %6d' \
@@ -470,7 +472,7 @@ def printMatchingExons (ixR, ixT, exonR, exonT):
                exonR.end-exonR.start+1,  exonT.end-exonT.start+1, \
                exonR.inserts, exonR.deletes),
     if hasattr (exonR, 'substs'):
-        print ' sub: %2d' % exonR.substs,  # comma: line continued in printStartStop
+        print ' sub: %2d  Q: %4.1f' % (exonR.substs, exonR.QScore()),  # comma: line continued in printStartStop
 
 def printReadExon (ixR, exonR):
     '''Print read exon which has no matching transcript exon.'''
@@ -478,7 +480,7 @@ def printReadExon (ixR, exonR):
     print 'exon:                %2d   .   %9d          .      .  %9d          .      .      len: %4d    .  ins: %2d  del: %2d' \
         % (ixR+1, exonR.start, exonR.end, exonR.end-exonR.start+1, exonR.inserts, exonR.deletes),
     if hasattr (exonR, 'substs'):
-        print ' sub: %2d' % exonR.substs        # no comma: EOL here
+        print ' sub: %2d  Q: %4.1f' % (exonR.substs, exonR.QScore())        # no comma: EOL here
 
 def printTranExon (ixT, exonT):
     '''Print transcript exon which has no matching read exon.'''
