@@ -23,7 +23,7 @@ import ClusterReport as clrep
 import CigarString   as cs
 import PolyA
 
-VERSION = '20150126.01'
+VERSION = '20150127.01'
 
 FLAG_NOT_ALIGNED = 0x04         # SAM file flags
 FLAG_REVERSE     = 0x10
@@ -83,7 +83,7 @@ def main ():
 
         lineFields = line.split('\t')                          # just split it once, not 6 times in list comp
         if len(lineFields) < 10:
-            raise RintimeError ('mis-formed SAM line: %s' % line)
+            raise RuntimeError ('mis-formed SAM line: %s' % line)
         clusterName, flags, chr, start, cigarString, bases = [lineFields[i] for i in (0,1,2,3,5,9)]
         flags = int(flags)
 
