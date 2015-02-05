@@ -9,7 +9,7 @@ import cPickle as pickle
 
 from tt_log import logger
 
-VERSION = '20141104.01'
+VERSION = '20150205.01'
 logger.debug('version %s loaded' % VERSION)
 
 class Annotation (object):
@@ -227,6 +227,7 @@ class AnnotationList (object):
         logger.debug('reading annotations in alternate format from %s' % self.filename)
 
         regexGene = re.compile ('gene_name \"*([^\"]+)\"*\;')
+        regexGID  = re.compile ('gene_id \"*([^\"]+)\"*\;')
         regexTran = re.compile ('transcript_name \"*([^\"]+)\"*\;')
         regexTID  = re.compile ('transcript_id \"*([^\"]+)\"*\;')
         regexExon = re.compile ('exon_number \"*(\d+)\"*\;')         # some files have quotes around exon number, some don't
@@ -257,7 +258,9 @@ class AnnotationList (object):
 
                 match = re.search(regexGene, attrs)
                 if match is None:
-                    raise RuntimeError ('no gene_name field in %s' % line)
+                    match = re.search(regexGID, attrs)             # if no gene_name field, try gene_id
+                    if match is None:
+                        raise RuntimeError ('no gene_name/gene_id field in %s' % line)
                 geneName = match.group(1)
 
                 if geneEnt is None or geneName != geneEnt.name:
