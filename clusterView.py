@@ -2,6 +2,10 @@
 
 # Read annotation file, plot exons for each transcript of a specified gene.
 
+# The plot shows blocks of contiguous exonic sequence, and eliminates
+# regions which are not included in any transcript (IsoSeq cluster or
+# annotation). in order to devote more plot real estate to the exons.
+
 import os
 import sys
 import optparse
@@ -19,7 +23,7 @@ import Best        as best
 import Cluster     as cl
 import CigarString as cs
 
-VERSION = '20141219.01'
+VERSION = '20150319.01'
 
 DEF_OUTPUT = 'exons.png'        # default plot filename
 DEF_YSCALE = 1.0                # default  Y-axis scale factor
@@ -30,9 +34,11 @@ MAX_LABELS = 20                 # how many labels fit across the X axis
 EXTRA_SPACE = 1.0               # added vertical space in figure for labels, etc
 
 FASTA_WRAP = 60                 # bases per fasta line
+Q_THRESHOLD = 20.0              # passing grade for Q score
+MIN_REGION_SIZE = 50
 
 REGEX_NAME = re.compile ('(c\d+)')      # cluster ID in cluster name
-COMPLTAB   = string.maketrans ('ACGT', 'TGCA')         # for reverse-complementing reads
+COMPLTAB   = string.maketrans ('ACGTacgt', 'TGCAtgca')     # for reverse-complementing reads
 
 def main ():
 
@@ -61,19 +67,25 @@ def main ():
         exonList.sort(key=lambda x: x.end, reverse=True)   # sort the list by decreasing end position
         blocks = assignBlocksReverse (opt, exonList)       # assign each exon to a block -- backwards
 
+    findRegions (tranList)                       # determine regions occupied by each transcript
+
     tranNames = orderTranscripts (tranList)      # set Y-axis coords for the transcripts
 
-    vertSize = int(FIG_HEIGHT_PER_TRANS * len(tranList) * opt.yscale + EXTRA_SPACE)
+    vertSize = FIG_HEIGHT_PER_TRANS * len(tranList) * opt.yscale + EXTRA_SPACE
     margin = EXTRA_SPACE / vertSize / 2.0
-    plt.figure (figsize=(FIG_WIDTH, vertSize))
+    logger.debug('nTrans: %d  vertSize: %5.2f  margin: %5.2f' % (len(tranList), vertSize, margin))
+    plt.figure (figsize=(FIG_WIDTH, int(vertSize)))
     plt.subplots_adjust (top=1.0-margin, bottom=margin, left=0.13)
     plt.subplot (111)
 
     plotExons (exonList, blocks)                 # plot the exons
 
-    plotStartStop (tranList, blocks)             # start/stop  codons to plot
+    plotStartStop (tranList, blocks)             # start/stop codons to plot
 
     plotBoundaries (tranNames, blocks)           # plot block boundaries as vertical lines
+
+    if opt.notes is not None:
+        addNotes (tranList, blocks, opt.notes)
 
     if opt.title is not None:
         plt.title (opt.title)
@@ -122,7 +134,7 @@ def getGeneFromAnnotation (opt, tranList, exonList):
             myTran.stopcodon = tran.stopcodon
 
         for exon in tran.getChildren():                     # exon is an Annotation object
-            myExon = Exon(myTran, exon.name, exon.start, exon.end, exon.strand)
+            myExon = Exon(myTran, exon.name, exon.start, exon.end, exon.strand)     # no Q score
             exonList.append (myExon)
             myTran.exons.append(myExon)
 
@@ -142,35 +154,56 @@ def getGeneFromMatches (opt, tranList, exonList):
     localList = list()                                                 # temporary list of clusters
     totClusters = 0
 
-    clusterDict = cl.ClusterDict.fromPickle (opt.matches)              # pickle file produced by matchAnnot.py
+    for matchFile in opt.matches:                                      # --matches may have been specified more thn once
 
-    for cluster in clusterDict.getClustersForGene(opt.gene):           # cluster is Cluster object
+        clusterDict = cl.ClusterDict.fromPickle (matchFile)            # pickle file produced by matchAnnot.py
 
-        totClusters += 1
+        for cluster in clusterDict.getClustersForGene(opt.gene):       # cluster is Cluster object
 
-        match = re.search (REGEX_NAME, cluster.name)
-        if match is not None and match.group(1) in shows:              # if this is a force-include cluster
-            localList.append ( [cluster, 'f999999p999999'] )           # fake sort key to push it to the front
-        elif match is None or match.group(1) not in omits:
-            full, partial = cluster.getFP()
-            sortKey = 'f%06dp%06d' % (full, partial)                   # single key includes full and partial counts
-            localList.append ( [cluster, sortKey] )
+            totClusters += 1
+
+            match = re.search (REGEX_NAME, cluster.name)
+            if match is not None and match.group(1) in shows:          # if this is a force-include cluster
+                localList.append ( [cluster, 'f999999p999999'] )       # fake sort key to push it to the front
+            elif match is None or match.group(1) not in omits:
+                full, partial = cluster.getFP()
+                sortKey = 'f%06dp%06d' % (full, partial)               # single key includes full and partial counts
+                localList.append ( [cluster, sortKey] )
 
     if opt.howmany is not None:
         localList.sort(key=lambda x: x[1], reverse=True)               # sort by full/partial counts
         localList = localList[:opt.howmany]                            # keep the top N entries (which will include the forces)
+
+    totFull = 0
+    totPartial = 0
 
     for ent in localList:
 
         cluster = ent[0]
         myTran = Transcript(cluster.name, score=cluster.bestScore)
 
-        cigar = cs.CigarString(cluster.cigarString)
-        for exonNum, exon in enumerate(cigar.exons (cluster.start)):   # exon is a cs.Exon object
+        full, partial = cluster.getFP()
+        totFull += full
+        totPartial += partial
+
+        leading, trailing = cluster.cigar.softclips()
+
+        for exonNum, exon in enumerate(cluster.cigar.exons (cluster.start)):   # exon is a cs.Exon object
+
             exonName = '%s/%d' % (myTran.name, exonNum)                # exons don't have names: make one up
-            myExon = Exon(myTran, exonName, exon.start, exon.end, cluster.strand)
+
+            if hasattr (exon, 'substs'):                               # if MD string was supplied
+                myExon = Exon(myTran, exonName, exon.start, exon.end, cluster.strand, QScore=exon.QScore())
+            else:
+                myExon = Exon(myTran, exonName, exon.start, exon.end, cluster.strand)
+
+            if exonNum == 0:
+                myExon.leading = leading              # add leading softclips to first exon
+
             exonList.append (myExon)
             myTran.exons.append(myExon)
+
+        myExon.trailing = trailing                    # add trailing softclips to last exon
 
         tranList.append (myTran)
 
@@ -178,6 +211,7 @@ def getGeneFromMatches (opt, tranList, exonList):
             writeFasta (opt, cluster)
 
     logger.debug('kept %d of %d clusters for gene %s' % (len(localList), totClusters, opt.gene))
+    logger.debug('kept clusters include %d full + %d partial reads' % (totFull, totPartial))
 
     return tranList, exonList
 
@@ -251,6 +285,47 @@ def assignBlocksReverse (opt, exonList):
 
     return blocks
 
+def findRegions (tranList):
+    '''Find breakpoints where coverage by exons changes.'''
+
+    # Why are we doing this? See the note in the Transcript class
+    # definition below.
+
+    breaks = list()
+
+    for tranIx, tran in enumerate(tranList):
+
+        for exon in tran.exons:
+            breaks.append ([exon.start, 0, tranIx, tran.name, exon.name])
+            breaks.append ([exon.end,   1, tranIx, tran.name, exon.name])
+
+    breaks.sort (key=lambda x: x[0])
+    curPos = breaks[0][0]
+    curTranSet = set()
+    region = 0
+
+    for ix in xrange(len(breaks)):
+
+        posit, flag, tranIx, tranName, exonName = breaks[ix]
+
+        if posit > curPos + MIN_REGION_SIZE:             # this is a new region
+            if len(curTranSet) > 0:
+                for ix in curTranSet:
+                    tranList[ix].regions.add(region)     # update set of regions hit by this transcript
+                region += 1
+            curPos = posit
+
+        if flag == 0:                                    # exon start
+####            print '%9d  start  %s' % (posit, exonName)
+            curTranSet.add (tranIx)
+        else:                                            # exon end
+####            print '%9d  end    %s' % (posit, exonName)
+            curTranSet.remove (tranIx)
+
+    logger.debug('found %d regions' % region)
+
+    return
+
 def orderTranscripts (tranList):
     '''
     Order the transcripts (i,e., assign each a Y coordinate) so similar
@@ -278,11 +353,13 @@ def orderTranscripts (tranList):
         bestTran = best.Best(reverse=True)
         for myTran in tranList:                     # find the next closest transcript
             if myTran.tranIx is None:               # if transcript hasn't been indexed yet
-                diff = len(curTran.blocks.symmetric_difference(myTran.blocks))
+                diff = len(curTran.regions.symmetric_difference(myTran.regions))
                 bestTran.update(diff, myTran)
 
         if bestTran.which is None:                  # every transcript has its index: we're done
             break
+        else:
+            logger.debug('%2d  %s' % (bestTran.value, bestTran.which.name))
 
         curTran = bestTran.which
         tranIx += 1
@@ -301,9 +378,20 @@ def plotExons (exonList, blocks):
             color = 'green'
             blocks[myExon.block].annot = True       # this block includes annotation
         else:
-            color = 'purple' if myExon.tran.score == 5 else 'blue'
+            if myExon.QScore is None or myExon.QScore < Q_THRESHOLD:
+                color = 'Magenta' if myExon.tran.score == 5 else 'DodgerBlue'
+            else:
+                color = 'purple' if myExon.tran.score == 5 else 'blue'
 
         plt.hlines (myExon.tran.tranIx+1, adjStart, adjStart+exonSize, linewidth=3, colors=color, zorder=1)
+
+        # Softclipped bases: Rather than fiddle with start/stop positions, just overwrite blue with orange 
+
+        if myExon.leading > 0:
+            plt.hlines (myExon.tran.tranIx+1, adjStart, adjStart+myExon.leading, linewidth=3, colors='orange', zorder=2)
+        if myExon.trailing > 0:
+            plt.hlines (myExon.tran.tranIx+1, adjStart+exonSize-myExon.trailing, adjStart+exonSize, linewidth=3, colors='orange', zorder=2)
+
 
     return
 
@@ -349,7 +437,7 @@ def plotBoundaries (tranNames, blocks):
         plt.vlines (bound.boundary, 0, len(tranNames)+1, linewidth=0.5, colors='red')    # block boundary
 
         if not bound.annot:            # if block does not include annotation exon(s), make it blush
-            plt.axvspan(frompos, bound.boundary, facecolor='pink', alpha=0.8)
+            plt.axvspan(frompos, bound.boundary, facecolor='Pink', alpha=0.4)
 
         if len(ticksStart) == 0 or frompos - ticksStart[-1] > tickSep:     # add tick only if there's room for the label
             ticksStart.append(frompos)
@@ -386,6 +474,97 @@ def plotBoundaries (tranNames, blocks):
     plt.yticks (xrange(1,len(tranNames)+2), tranNames, fontsize='xx-small')
 
     return
+
+def addNotes (tranList, blocks, filename):
+    '''Add user-supplied notations to plot.'''
+
+    xmax = blocks[-1].boundary        # max X coord in figure
+
+    for fields in parseNoteFile (filename):
+
+        tran = matchTran (tranList, fields['tran'])
+        if tran is None:
+            raise RuntimeError ('no transaction matches %s from notes file' % fields['tran'])
+
+        if fields['xpos'].endswith('%'):
+            xcoord = blocks[-1].boundary * float(fields['xpos'][:-1]) / 100.0
+        else:
+            raise RuntimeError ('no X coordinate specified')
+
+        fc   = fields.get('fc', 'white')
+
+        if 'xoff' in fields or 'yoff' in fields:
+
+            xoff = int(fields.get('xoff', 0))
+            yoff = int(fields.get('yoff', 0))
+
+            plt.annotate (fields['text'], 
+                          (xcoord, tran.tranIx+1),
+                           fontsize='xx-small',
+                           verticalalignment='center',
+                           xytext=(xoff, yoff), textcoords='offset points',
+                           arrowprops=dict(arrowstyle='->'),
+                           bbox=dict(boxstyle='round', fc=fc))
+        else:
+
+            plt.annotate (fields['text'], 
+                          (xcoord, tran.tranIx+1),
+                           fontsize='xx-small',
+                           verticalalignment='center',
+                           bbox=dict(boxstyle='round', fc=fc))
+
+
+    return
+
+def parseNoteFile (filename):
+    '''
+    Parse a file of user notes to be applied to the plot. Return a
+    line at a time as a dict.
+    '''
+
+    allTags       = ('tran', 'xpos', 'text', 'xoff', 'yoff', 'fc')
+    mandatoryTags = ('tran', 'xpos', 'text')
+
+    regexComment = re.compile ('\s*#.*')
+    regexFields  = re.compile ('(\S+):\s+(?:\'([^\']*)\'|(\S+))')
+
+    handle = open (filename, 'r')
+
+    for line in handle:
+
+        line = re.sub (regexComment, '', line)          # Remove comments
+        if line.isspace():                              # skip blank (or comment) lines
+            continue
+
+        ret = dict()
+
+        matches = re.finditer (regexFields, line)
+        for match in matches:
+            tag = match.group(1)
+            val = match.group(2) if match.group(2) is not None else match.group(3) 
+            if tag not in allTags:
+                raise RuntimeError ('tag \'%s\' unrecognized in %s' % (tag, line.strip()))
+            ret[tag] = val
+####            logger.debug ('%s: %s' % (tag, val))
+
+        for mand in mandatoryTags:               # make sure required tags are present
+            if mand not in ret:
+                raise RuntimeError ('required tag \'%s\' not found in %s' % (mand, line.strip()))
+
+        yield ret
+
+    handle.close()
+
+    return
+
+def matchTran (tranList, pattern):
+    '''Find the first transaction in the list whose name contains the pattern.'''
+
+    for tran in tranList:
+        if tran.name.find(pattern) >= 0:
+            return tran
+
+    return None
 
 def printDetails (opt, blocks, exonList):
     '''Print numerical details on block occupancy.'''
@@ -446,12 +625,14 @@ def writeFasta (opt, cluster):
 
 def getParms ():                       # use default input sys.argv[1:]
 
-    parser = optparse.OptionParser(usage='%prog [options]')
+    # Note that --matches can be specified more than once, and opt.matches is a list.
+
+    parser = optparse.OptionParser(usage='%prog [options]', version=VERSION)
 
     parser.add_option ('--gtf',     help='annotations file, in format specified by --format (optional)')
     parser.add_option ('--format',  help='format of annotation file: standard, alt, pickle (def: %default)', \
                            type='choice', choices=['standard', 'alt', 'pickle'])
-    parser.add_option ('--matches', help='pickle file from matchAnnot.py (optional)')
+    parser.add_option ('--matches', help='pickle file from matchAnnot.py (optional)', action='append')
     parser.add_option ('--gene',    help='gene to plot (required)')
     parser.add_option ('--omit',    help='clusters to ignore, e.g., c1234,c2345,c3456')
     parser.add_option ('--show',    help='clusters to force shown, even if underpopulated')
@@ -462,6 +643,7 @@ def getParms ():                       # use default input sys.argv[1:]
     parser.add_option ('--details', help='output file name for details in text format (def: no output)')
     parser.add_option ('--fasta',   help='output directory for fasta files for chosen clusters (def: no output)')
     parser.add_option ('--title',   help='title for top of figure')
+    parser.add_option ('--notes',   help='file of notations to add to plot (experts only!)')
 
     parser.set_defaults (format='standard',
                          output=DEF_OUTPUT,
@@ -478,26 +660,45 @@ class Transcript (object):
 
     def __init__ (self, name, score=None, annot=False):
         
-        self.name   = name
-        self.score  = score
-        self.annot  = annot            # transcript comes from annotations?
-        self.tranIx = None             # y-axis coordinate of transcript
-        self.blocks = set()            # blocks where this transcript has exon(s)
-        self.exons  = list()           # Exon objects for this transcript
+        self.name    = name
+        self.score   = score
+        self.annot   = annot            # transcript comes from annotations?
+        self.tranIx  = None             # y-axis coordinate of transcript
+        self.exons   = list()           # Exon objects for this transcript
+        self.blocks  = set()            # blocks where this transcript has exon(s)
+        self.regions = set()            # regions where this transcript has exon(s) 
+
+        # What's the difference between a block and a region? Every
+        # exon boundary defines a new region. A new block occurs only
+        # when exon coverage transitions from 0 to >0. The example
+        # below comprises 5 regions, but only one block.
+
+        #    ==============
+        #           ==============
+        #                      ==================
+        #    |      |     |    | |              |
+
+        # I originally used block occupancy to group similar
+        # transcripts in orderTranscripts. But that turned out not to
+        # work very well, so I invented regions as a finer-grain
+        # version of that idea.
 
 
 class Exon (object):
     '''Struct containing data about an exon.'''
 
-    def __init__ (self, tran, name, start, end, strand):
+    def __init__ (self, tran, name, start, end, strand, QScore=None):
 
-        self.tran     = tran           # Transcript object containing this exon
+        self.tran     = tran            # Transcript object containing this exon
         self.name     = name
         self.start    = start
         self.end      = end
         self.strand   = strand
-        self.block    = None           # block number where this exon resides
-        self.adjStart = None           # start of exon in phony x-axis coordinates
+        self.QScore   = QScore
+        self.block    = None            # block number where this exon resides
+        self.adjStart = None            # start of exon in phony x-axis coordinates
+        self.leading  = 0               # number of leading softclipped bases
+        self.trailing = 0               # number of trailing softclipped bases
 
 
 class Block (object):

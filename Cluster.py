@@ -9,21 +9,21 @@ import cPickle as pickle
 
 from tt_log import logger
 
-VERSION = '20141103.01'
+VERSION = '20150109.01'
 logger.debug('version %s loaded' % VERSION)
 
 regexFP = re.compile('f(\d+)p(\d+)')      # finds full and partial read counts in cluster ID
 
 class Cluster (object):
 
-    def __init__ (self, name, flags, chr, start, strand, cigarString, bases):
+    def __init__ (self, name, flags, chr, start, strand, cigar, bases):
 
         self.name   = name
         self.flags  = flags
         self.chr    = chr
         self.start  = start
         self.strand = strand
-        self.cigarString = cigarString
+        self.cigar  = cigar
         self.bases  = bases
         self.pctGC  = None     # computed and cached below
         self.bestGene  = None

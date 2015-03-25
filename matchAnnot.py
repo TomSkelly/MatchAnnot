@@ -23,7 +23,7 @@ import ClusterReport as clrep
 import CigarString   as cs
 import PolyA
 
-VERSION = '20150127.01'
+VERSION = '20150204.01'
 
 FLAG_NOT_ALIGNED = 0x04         # SAM file flags
 FLAG_REVERSE     = 0x10
@@ -286,14 +286,21 @@ def matchTranscripts (readExons, gene):
         if scores[ix] >= 2:
             showCoords (readExons, tran)
 
-    return gene[bestScore.which], scores[bestScore.which]     # return best transcript and score
+    # If we found no suitable transcript, we never call showCoords. At
+    # least print the exons once.
 
+    if scores[bestScore.which] == 0:
+        print 'tr:       (none)'
+        for ixR, exonR in enumerate(readExons):
+            printReadExon (ixR, exonR)
+
+    return gene[bestScore.which], scores[bestScore.which]     # return best transcript and score
 
 def findOverlaps (list1, list2):
     '''
     Given two lists of intervals, find the overlaps between them.  The
     lists contain objects which have 'start' and 'end' attributes --
-    they need not be of the same type, or suclasses of each other.
+    they need not be of the same type, or subclasses of each other.
 
     We return two arrays, one for each input list. There is an entry
     in the output array corresponding to each input list entry. The
@@ -415,7 +422,7 @@ def showCoords (readExons, tranExons):
 
     while ixR < len(overR) and ixT < len(overT):
 
-        if len(overR[ixR]) == 0 and len(overT[ixT]) == 0:
+        if len(overR[ixR]) == 0 and len(overT[ixT]) == 0:       # neither matches the other: which comes first?
 
             if readExons[ixR].start < tranExons[ixT].start:
 
@@ -428,18 +435,18 @@ def showCoords (readExons, tranExons):
                 printStartStop (tranExons, tranExons[ixT])
                 ixT += 1
 
-        elif len(overR[ixR]) == 0:
+        elif len(overR[ixR]) == 0:                              # read exon with no transcript match
 
             printReadExon (ixR, readExons[ixR])
             ixR += 1
 
-        elif len(overT[ixT]) == 0:
+        elif len(overT[ixT]) == 0:                              # transcript exon with no read match
 
             printTranExon (ixT, tranExons[ixT])
             printStartStop (tranExons, tranExons[ixT])
             ixT += 1
 
-        elif overR[ixR][0] == ixT and overT[ixT][0] == ixR:
+        elif overR[ixR][0] == ixT and overT[ixT][0] == ixR:    # matching exons
 
             printMatchingExons (ixR, ixT, readExons[ixR], tranExons[ixT])
             printStartStop (tranExons, tranExons[ixT])
@@ -449,7 +456,7 @@ def showCoords (readExons, tranExons):
         else:
             raise RuntimeError ('improper overlap: %s <-> %s' % (overlap2string(overR), overlap2string(overT)))
 
-    while ixR < len(overR):
+    while ixR < len(overR):                                    # deal with the stragglers
 
         exonR = readExons[ixR]
         printReadExon (ixR, exonR)
