@@ -9,7 +9,7 @@ import cPickle as pickle
 
 from tt_log import logger
 
-VERSION = '20141230.01'
+VERSION = '20150318.01'
 logger.debug('version %s loaded' % VERSION)
 
 regexChr = re.compile ('>(\S+)')
@@ -20,7 +20,8 @@ class Reference (object):
         '''Create a dict, keyed by chr, from a fasta file.'''
 
         self.filename = filename
-        self.ref    = dict()       # this is the stuff! key=chr value=sequence
+        self.ref      = dict()       # this is the stuff! key=chr value=sequence
+        self.chrList  = list()       # preserve original order of chromosomes
 
         logger.debug('reading reference fasta file %s' % self.filename)
 
@@ -31,7 +32,6 @@ class Reference (object):
 
         handle = open (self.filename, 'r')
 
-        ticker = 0
         accum = list()
 
         for line in handle:
@@ -43,18 +43,17 @@ class Reference (object):
                 if len(accum) > 0:
                     self.ref[chr] = ''.join(accum)     # see comment block above
                     accum = list()
-                    logger.debug('chromosome %s: %6d' % (chr, len(self.ref[chr])))
 
                 chr = re.match(regexChr, line).group(1)
                 if chr in self.ref:
                     raise RuntimeError ('duplicate chromsome %s' % chr)
+                self.chrList.append(chr)
 
             else:
                 accum.append(line)
 
         if len(accum) > 0:              # last one?
             self.ref[chr] = ''.join(accum)
-            logger.debug('chromosome %s: %6d' % (chr, len(self.ref[chr])))
 
         handle.close()
 
@@ -83,13 +82,19 @@ class Reference (object):
         return
 
     def chromosomes (self):
-        '''Generator function for the chromosome names in an Reference object.'''
+        '''
+        Generator function for the chromosome names in an Reference
+        object. Preserves the order of the original reference file.
+        '''
 
-        for chr in sorted(self.ref.keys()):
+        for chr in self.chrList:
             yield chr
 
         return
 
-    def sequence (self, chr, start, howmany):
+    def sequence (self, chr, start=1, howmany=None):
+
+        if howmany is None:
+            howmany = len(self.ref[chr]) - start + 1
 
         return self.ref[chr][start-1:start-1+howmany]      # -1: reference is stored 0-based
