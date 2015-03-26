@@ -358,8 +358,8 @@ def orderTranscripts (tranList):
 
         if bestTran.which is None:                  # every transcript has its index: we're done
             break
-        else:
-            logger.debug('%2d  %s' % (bestTran.value, bestTran.which.name))
+####        else:
+####            logger.debug('%2d  %s' % (bestTran.value, bestTran.which.name))
 
         curTran = bestTran.which
         tranIx += 1
