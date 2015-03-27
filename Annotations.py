@@ -9,7 +9,7 @@ import cPickle as pickle
 
 from tt_log import logger
 
-VERSION = '20150205.01'
+VERSION = '20150327.01'
 logger.debug('version %s loaded' % VERSION)
 
 class Annotation (object):
@@ -284,7 +284,7 @@ class AnnotationList (object):
                 else:
                     raise RuntimeError ('no transcript_name/transcript_id field in %s' % line)
 
-                if tranEnt is None or tranName != tranEnt.name:
+                if tranEnt is None or tranName != tranEnt.name or tranID != tranEnt.ID:
                     tranEnt = Annotation (start, end, strand, tranName)
                     tranEnt.ID     = tranID                   # only transcripts have ID and length attributes
                     tranEnt.length = 0
