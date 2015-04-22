@@ -13,7 +13,7 @@ import cPickle as pickle
 from tt_log import logger
 import Annotations as anno
 
-VERSION = '20141006.01'
+VERSION = '20150417.01'
 
 def main ():
 
@@ -42,7 +42,7 @@ def main ():
 
         for transEnt in geneEnt.getChildren():
             print '\ntr:      ',
-            printEnt (transEnt)
+            printTran (transEnt)
 
             for exonEnt in transEnt.getChildren():
                 print 'exon:    ',
@@ -55,6 +55,19 @@ def main ():
 def printEnt (ent):
 
     print '%-15s  %9d  %9d  %6d' % (ent.name, ent.start, ent.end, ent.end-ent.start+1)
+
+    return
+
+def printTran (ent):
+
+    print '%-15s  %9d  %9d  %6d' % (ent.name, ent.start, ent.end, ent.end-ent.start+1),
+    if hasattr (ent, 'startcodon'):
+        print ' start: %9d' % ent.startcodon,
+    if hasattr (ent, 'stopcodon'):
+        print ' stop:  %9d' % ent.stopcodon,
+    print
+
+    return
 
 def getParms ():                       # use default input sys.argv[1:]
 
