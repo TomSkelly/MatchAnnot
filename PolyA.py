@@ -1,11 +1,20 @@
 #!/usr/bin/env python
 
-# Look for a list of polyadenylation triggers in a sequence.
+# Look for a list of polyadenylation triggers in a sequence. The
+# default list of motifs below is taken from:
+
+# Derti et al, (2012). A quantitative atlas of polyadenylation in five
+# mammals. Genome Research, 22, 1173-1183. doi:10.1101/gr.132563.111
 
 import os
 import sys
 import string
 import re                       # for regular expressions
+
+from tt_log import logger
+
+VERSION = '20150402.01'
+logger.debug('version %s loaded' % VERSION)
 
 class PolyA (object):
     
