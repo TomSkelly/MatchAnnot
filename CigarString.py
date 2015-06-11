@@ -11,7 +11,7 @@ import re                       # for regular expressions
 import math
 from tt_log import logger
 
-VERSION = '20150514.01'
+VERSION = '20150611.01'
 logger.debug('version %s loaded' % VERSION)
 
 DEF_Q = 50.0                    # Q score for error-free exon
@@ -327,12 +327,13 @@ class CigarString (object):
 
         return ' '.join([ '%s%s' % (x[0], x[1]) for x in self.expCfields ])
 
-    def printVariantList (self):
+    def printVariantList (self, bases):
 
         for var in self.variants:
             type, count, start, offset = var[0:4]
-            refBases = var[4] if len(var) == 5 else '-'
-            print 'var:      %s  %2d  %9d  %5d  %s' % (type, count, start, offset, refBases)
+            refBases = var[4] if len(var) == 5 else '-'      # reference base is present unless it's an insert error
+            readBases = bases[offset:offset+len(refBases)] if type != 'D' else '-'
+            print 'var:      %s  %2d  %9d  %5d  %s  %s' % (type, count, start, offset, refBases, readBases)
 
         return
 

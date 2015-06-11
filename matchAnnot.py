@@ -23,7 +23,7 @@ import ClusterReport as clrep
 import CigarString   as cs
 import PolyA
 
-VERSION = '20150512.01'
+VERSION = '20150611.02'
 
 FLAG_NOT_ALIGNED = 0x04         # SAM file flags
 FLAG_REVERSE     = 0x10
@@ -140,7 +140,8 @@ def main ():
         if cigar.MD is not None:
             print 'MD:       %s' % cigar.MD
 
-        cigar.printVariantList()
+        if opt.vars is not None:                         # print variant (var:) lines
+            cigar.printVariantList(bases)
 
         if opt.clusters is not None:                     # print cluster (cl:) lines
             printClusterReads (clusterList, clusterName)
@@ -483,18 +484,13 @@ def printMatchingExons (ixR, ixT, exonR, exonT):
     if exonR.substs is not None:
         print ' sub: %2d  Q: %4.1f' % (exonR.substs, exonR.QScore()),  # comma: line continued in printStartStop
 
-    print ' %5d  %3d' % (exonR.offset, exonR.size),       # debug
-
 def printReadExon (ixR, exonR):
     '''Print read exon which has no matching transcript exon.'''
 
     print 'exon:                %2d   .   %9d          .      .  %9d          .      .      len: %4d    .  ins: %2d  del: %2d' \
         % (ixR+1, exonR.start, exonR.end, exonR.end-exonR.start+1, exonR.inserts, exonR.deletes),
     if exonR.substs is not None:
-####        print ' sub: %2d  Q: %4.1f' % (exonR.substs, exonR.QScore())        # no comma: EOL here
-        print ' sub: %2d  Q: %4.1f' % (exonR.substs, exonR.QScore()),       # debug
-        
-    print ' %5d  %3d' % (exonR.offset, exonR.size)         # debug
+        print ' sub: %2d  Q: %4.1f' % (exonR.substs, exonR.QScore())        # no comma: EOL here
 
 def printTranExon (ixT, exonT):
     '''Print transcript exon which has no matching read exon.'''
@@ -529,12 +525,10 @@ def getParms ():                       # use default input sys.argv[1:]
     parser.add_option ('--format',    help='annotations in alternate gtf format (def: %default)', \
                            type='choice', choices=['standard', 'alt', 'pickle'])
     parser.add_option ('--clusters',  help='cluster_report.csv file name (optional)')
+    parser.add_option ('--vars',      help='print variants for each cluster (def: no)', action='store_true')
     parser.add_option ('--outpickle', help='matches in pickle format (optional)')
 
-    parser.set_defaults (gtf=None,
-                         format='standard',
-                         clusters=None,
-                         outpickle=None,
+    parser.set_defaults (format='standard',
                          )
 
     opt, args = parser.parse_args()
