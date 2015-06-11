@@ -9,7 +9,7 @@ import cPickle as pickle
 
 from tt_log import logger
 
-VERSION = '20150327.01'
+VERSION = '20150611.01'
 logger.debug('version %s loaded' % VERSION)
 
 class Annotation (object):
@@ -381,6 +381,58 @@ class AnnotationList (object):
             return gd[geneName]
         else:
             return None
+
+    def annotatePolyA (self, ref):
+        '''
+        For each annotated exon, search the reference for genomic
+        polyA regions, and add them to the exon.
+        '''
+
+        # We will process every annotated exon. But many exons appear
+        # in multiple transcripts of a given gene. We will cache the
+        # polyA annotations we compute, and apply the cached value to
+        # any later occurrence of an exon with the same start/stop
+        # coordinates. This delivers about a 10-to-1 speedup.
+
+        for chr in self.chromosomes():                    # chr is a string
+
+            logger.debug('adding polyA annotations for chr %s' % chr)
+
+            numExons  = 0
+            numCached = 0
+            numPoly   = 0
+
+            for gene in self.geneList (chr):              # gene is an Annotation object
+
+                cache = dict()                            # we'll cache polyAs, one gene at a time
+
+                for tran in gene.getChildren():           # tran is an Annotation object
+                    for exon in tran.getChildren():       # exon is an Annotation object
+
+                        numExons += 1
+
+                        if hasattr (exon, 'polyAs'):
+                            delattr (exon, 'polyAs')      # pickled annotation might contain stale info
+
+                        key = '%09d-%09d' % (exon.start, exon.end)
+                        if key not in cache:
+                            cache[key] = ref.findPolyAs (chr, exon.start, exon.end, exon.strand)
+                        else:
+                            numCached += 1
+                        polys = cache[key]
+
+####                        if gene.name == 'KRAS':
+####                            print '%s %s %d %d %s' % (exon.name, chr, exon.start, exon.end, exon.strand)
+####                            print polys
+
+                        if len(polys) > 0:
+                            exon.polyAs = polys
+                            numPoly += 1
+
+            logger.debug('%d of %d exons were cached' % (numCached, numExons))
+            logger.debug('%d polyA tracts were found' % (numPoly))
+
+        return
 
 
 class AnnotationCursor (object):

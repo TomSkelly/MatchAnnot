@@ -5,12 +5,16 @@
 import os
 import sys
 import re                       # for regular expressions
+import math                     # for ceil
 import cPickle as pickle
 
 from tt_log import logger
 
-VERSION = '20150318.01'
+VERSION = '20150610.01'
 logger.debug('version %s loaded' % VERSION)
+
+DEF_WINDOW = 23
+DEF_THRESH = 0.65
 
 regexChr = re.compile ('>(\S+)')
 
@@ -98,3 +102,104 @@ class Reference (object):
             howmany = len(self.ref[chr]) - start + 1
 
         return self.ref[chr][start-1:start-1+howmany]      # -1: reference is stored 0-based
+
+    def findPolyAs (self, chr, start, end, strand, window=DEF_WINDOW, thresh=DEF_THRESH):
+        '''Find all A/T-rich regions in a specified range.'''
+
+        # At the caller interface, indexes describing genomic regions
+        # will be 1-based and inclusive. I.e., start=1, end=100
+        # describes the first 100 bases of a chromosome. But
+        # internally here, indexes will be pythonic: 0-based and
+        # exclusive of the last element. I.e., [0:100] describes those
+        # same first 100 bases.
+
+        polyAs = list()
+        if end-start+1 < window:
+            return polyAs
+        
+        look4 = 'A' if strand ==  '+' else 'T'
+        winStart = start - 1                                              # 0-based index of first base of currently accepted tract
+        winEnd   = winStart + window - 1                                  # 0-based index of last base of currently accepted tract
+        stopAt   = min(end-1, len(self.ref[chr])-1)                       # 0-based index of last usable base
+####        print 'stopAt: %2d  end: %2d' % (stopAt, winEnd)
+
+        while winEnd <= stopAt:
+
+            howmany = self.ref[chr].count(look4, winStart, winEnd+1)
+            numNeeded = int(math.ceil( (winEnd-winStart+1) * thresh))     # rounds upward
+
+####            print '---> start: %2d  end: %2d  needed: %2d  howmany: %2d' % (winStart, winEnd, numNeeded, howmany)
+
+            if howmany < numNeeded:
+
+                # Bump by the smallest number of bases that could get
+                # us to the total required. E.g.: suppose window=20,
+                # thresh=.9, numNeeded=18. If we have 15 bases in the
+                # window (howmany=15), we need to bump by at least 3
+                # to get to 18.
+
+                winStart += numNeeded - howmany
+
+            else:    # we've found a tract, now extend it
+
+                while winEnd < stopAt:
+
+                    winEnd += 1                                                   # bump window size
+
+                    numNeeded = int(math.ceil( (winEnd-winStart+1) * thresh))     # new numNeeded for larger window
+                    if self.ref[chr][winEnd] == look4:
+                        howmany += 1                                              # new number of As for larger window
+####                    print '     start: %2d  end: %2d  needed: %2d  howmany: %2d' % (winStart, winEnd, numNeeded, howmany)
+
+                    if howmany < numNeeded:                                       # does larger window still work?
+                        winEnd -= 1                                               # reject larger window
+                        break
+
+                polyAs.append( [winStart+1, winEnd+1, howmany] )                  # returned indexes are 1-based
+                winStart = winEnd
+
+            winEnd = winStart + window - 1
+
+        return polyAs
+
+
+class PhonyRef (Reference):
+    '''Reference initialized from a string, to support unitTest.'''
+
+    def __init__ (self, chr, sequence):    
+
+        self.ref = {chr : sequence}
+
+
+def unitTest ():
+
+    #               0        1         2         3
+    #               123456789012345678901234567890
+    testcases = ( ['AAAAAAAAAAAAAAAAAAAA',           1, 99, [ [1, 20, 20] ] ],
+                  ['AAAAAAAAAAAAAAAAAAAA',           1, 20, [ [1, 20, 20] ] ],
+                  ['AAAAAAAAAAAAAAAAAAAA',           1, 19, [ ] ],
+                  ['AAAAAAAAAAAAAAAAAAAT',           1, 20, [ [1, 20, 19] ] ],
+                  ['TTTAAAAAAAAAAAAAAAAAAAATTTTTTT', 1, 99, [ [2, 23, 20] ] ],
+                  ['TTTAAAAAAAAAAAAAAAAAAAATTTTTTT', 6, 99, [ [6, 25, 18] ] ],
+                  ['AAAAAAAAAAAAAAAAAAAATTTTTAAAAAAAAAAAAAAAAAAAA',
+                                                     1, 99, [ [1, 22, 20], [24, 45, 20] ] ],
+                  ['GGAAATGGCCTTATAATAGTTTCCATTGCCTTGTAATTTTTTTCCATTTTTTTCTTTTTA',
+                                                     1, 99, [ ] ],
+                  )
+
+    chr = 'chr5'
+    
+    for ix, test in enumerate(testcases):
+
+        phony = PhonyRef(chr, test[0])
+        result = phony.findPolyAs (chr, test[1], test[2], '-', window=23, thresh=0.8)
+
+        if result == test[3]:
+            print 'test %d passed' % (ix+1)
+        else:
+            print 'test %d failed:' % (ix+1)
+            print result
+
+if __name__ == "__main__":
+    unitTest()
+

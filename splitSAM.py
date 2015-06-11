@@ -16,7 +16,7 @@ import string
 from tt_log import logger
 import CigarString as cs
 
-VERSION = '20140924.01'
+VERSION = '20150501.01'
 
 FLAG_NOT_ALIGNED = 0x04         # SAM file flags
 FLAG_REVERSE     = 0x10
@@ -59,6 +59,7 @@ def main ():
         lineFields = line.split('\t')            # just split it once, not 6 times in list comp
         readName, flags, chr, start, cigarString, bases = [lineFields[i] for i in (0,1,2,3,5,9)]
         flags = int(flags)
+        start = int(start)
 
         if readName.find('|f1p0|') != -1:
             totUnsup += 1
@@ -71,8 +72,7 @@ def main ():
         totAlign += 1
 
         strand = '-' if (flags & FLAG_REVERSE) else '+'
-        cigar = cs.CigarString(cigarString)
-        start = int(start)
+        cigar = cs.CigarString(cigarString, start)
         end   = start + cigar.genomicLength() - 1;       # -1 to report last base, rather than last+1
 
         if start < lastPos.get(chr, 0):

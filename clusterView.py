@@ -23,7 +23,7 @@ import Best        as best
 import Cluster     as cl
 import CigarString as cs
 
-VERSION = '20150319.01'
+VERSION = '20150529.01'
 
 DEF_OUTPUT = 'exons.png'        # default plot filename
 DEF_YSCALE = 1.0                # default  Y-axis scale factor
@@ -38,6 +38,7 @@ Q_THRESHOLD = 20.0              # passing grade for Q score
 MIN_REGION_SIZE = 50
 
 REGEX_NAME = re.compile ('(c\d+)')      # cluster ID in cluster name
+REGEX_LEN  = re.compile ('\|(\d+)$')    # cluster length in cluster name
 COMPLTAB   = string.maketrans ('ACGTacgt', 'TGCAtgca')     # for reverse-complementing reads
 
 def main ():
@@ -78,9 +79,11 @@ def main ():
     plt.subplots_adjust (top=1.0-margin, bottom=margin, left=0.13)
     plt.subplot (111)
 
-    plotExons (exonList, blocks)                 # plot the exons
+    plotExons (exonList, blocks, opt.flip)       # plot the exons
 
     plotStartStop (tranList, blocks)             # start/stop codons to plot
+
+    plotPolyAs (tranList, blocks)                # polyA tract markers to plot
 
     plotBoundaries (tranNames, blocks)           # plot block boundaries as vertical lines
 
@@ -108,6 +111,8 @@ def getGeneFromAnnotation (opt, tranList, exonList):
     if opt.gtf == None:
         return tranList, exonList
 
+    omits = [] if opt.omit is None else opt.omit.split(',')            # transcripts which must not be included
+
     if opt.format == 'pickle':
         annotList   = anno.AnnotationList.fromPickle (opt.gtf)
     elif opt.format == 'alt':
@@ -126,19 +131,24 @@ def getGeneFromAnnotation (opt, tranList, exonList):
 
     for tran in myGene.getChildren():                       # tran is an Annotation object
 
-        myTran = Transcript(tran.name, annot=True)
+        if tran.name not in omits:                          # if not in ignore list
 
-        if hasattr(tran, 'startcodon'):
-            myTran.startcodon = tran.startcodon
-        if hasattr(tran, 'stopcodon'):
-            myTran.stopcodon = tran.stopcodon
+            myTran = Transcript(tran.name, annot=True)
 
-        for exon in tran.getChildren():                     # exon is an Annotation object
-            myExon = Exon(myTran, exon.name, exon.start, exon.end, exon.strand)     # no Q score
-            exonList.append (myExon)
-            myTran.exons.append(myExon)
+            if hasattr(tran, 'startcodon'):
+                myTran.startcodon = tran.startcodon
+            if hasattr(tran, 'stopcodon'):
+                myTran.stopcodon = tran.stopcodon
 
-        tranList.append (myTran)
+            for exon in tran.getChildren():                 # exon is an Annotation object
+                myExon = Exon(myTran, exon.name, exon.start, exon.end, exon.strand)     # no Q score
+                if hasattr (exon, 'polyAs'):
+                    print exon.name
+                    myExon.polyAs = exon.polyAs
+                exonList.append (myExon)
+                myTran.exons.append(myExon)
+
+            tranList.append (myTran)
 
     return tranList, exonList
 
@@ -163,15 +173,46 @@ def getGeneFromMatches (opt, tranList, exonList):
             totClusters += 1
 
             match = re.search (REGEX_NAME, cluster.name)
+
             if match is not None and match.group(1) in shows:          # if this is a force-include cluster
                 localList.append ( [cluster, 'f999999p999999'] )       # fake sort key to push it to the front
-            elif match is None or match.group(1) not in omits:
+
+            elif match is None or match.group(1) not in omits:         # shows and omits trump length filter
+
                 full, partial = cluster.getFP()
                 sortKey = 'f%06dp%06d' % (full, partial)               # single key includes full and partial counts
-                localList.append ( [cluster, sortKey] )
+
+                matchLen = re.search(REGEX_LEN, cluster.name)          # filter by cluster length, if requested
+                if matchLen is None:
+                    raise RuntimeError ('no length in name: %s' % cluster.name)
+                    localList.append ( [cluster, sortKey] )            # shouldn't happen -- but let it slide
+                else:
+                    cLen = int(matchLen.group(1))
+                    if opt.minlen is None or cLen >= opt.minlen: 
+                        if opt.maxlen is None or cLen <= opt.maxlen: 
+                            localList.append ( [cluster, sortKey] )
+
+    localList.sort(key=lambda x: x[1], reverse=True)                   # sort by full/partial counts
+
+    if opt.nodups:                                                     # eliminate exact dups?
+
+        tempList = list()
+        uniqueClusters = set()
+        totDups = 0
+
+        for ent in localList:
+            cluster = ent[0]
+            key = '%9d %s | %s' % (cluster.start, cluster.cigar.prettyPrint(), cluster.cigar.MD)
+            if key in uniqueClusters:
+                totDups += 1
+            else:
+                tempList.append(ent)                                   # keep this
+                uniqueClusters.add(key)                                # remember it
+
+        localList = tempList
+        logger.debug('discarded %d clusters as exact duplicates of each other' % totDups)
 
     if opt.howmany is not None:
-        localList.sort(key=lambda x: x[1], reverse=True)               # sort by full/partial counts
         localList = localList[:opt.howmany]                            # keep the top N entries (which will include the forces)
 
     totFull = 0
@@ -188,11 +229,11 @@ def getGeneFromMatches (opt, tranList, exonList):
 
         leading, trailing = cluster.cigar.softclips()
 
-        for exonNum, exon in enumerate(cluster.cigar.exons (cluster.start)):   # exon is a cs.Exon object
+        for exonNum, exon in enumerate(cluster.cigar.exons()):         # exon is a cs.Exon object
 
             exonName = '%s/%d' % (myTran.name, exonNum)                # exons don't have names: make one up
 
-            if hasattr (exon, 'substs'):                               # if MD string was supplied
+            if cluster.cigar.MD is not None:                           # if MD string was supplied
                 myExon = Exon(myTran, exonName, exon.start, exon.end, cluster.strand, QScore=exon.QScore())
             else:
                 myExon = Exon(myTran, exonName, exon.start, exon.end, cluster.strand)
@@ -366,7 +407,7 @@ def orderTranscripts (tranList):
 
     return tranNames
 
-def plotExons (exonList, blocks):
+def plotExons (exonList, blocks, flip):
     '''Plot exons.'''
 
     for myExon in exonList:
@@ -387,11 +428,17 @@ def plotExons (exonList, blocks):
 
         # Softclipped bases: Rather than fiddle with start/stop positions, just overwrite blue with orange 
 
-        if myExon.leading > 0:
-            plt.hlines (myExon.tran.tranIx+1, adjStart, adjStart+myExon.leading, linewidth=3, colors='orange', zorder=2)
-        if myExon.trailing > 0:
-            plt.hlines (myExon.tran.tranIx+1, adjStart+exonSize-myExon.trailing, adjStart+exonSize, linewidth=3, colors='orange', zorder=2)
-
+        forwardStrand = '-' if flip else '+'
+        if myExon.strand == forwardStrand:       # cigar string always refers to forward sense, but plot transcript sense
+            if myExon.leading > 0:
+                plt.hlines (myExon.tran.tranIx+1, adjStart, adjStart+myExon.leading, linewidth=3, colors='orange', zorder=2)
+            if myExon.trailing > 0:
+                plt.hlines (myExon.tran.tranIx+1, adjStart+exonSize-myExon.trailing, adjStart+exonSize, linewidth=3, colors='orange', zorder=2)
+        else:
+            if myExon.leading > 0:
+                plt.hlines (myExon.tran.tranIx+1, adjStart+exonSize-myExon.leading, adjStart+exonSize, linewidth=3, colors='orange', zorder=2)
+            if myExon.trailing > 0:
+                plt.hlines (myExon.tran.tranIx+1, adjStart, adjStart+myExon.trailing, linewidth=3, colors='orange', zorder=2)
 
     return
 
@@ -421,6 +468,33 @@ def plotCodon (tran, posit, blocks, color):
 
     return
 
+def plotPolyAs (tranList, blocks):
+    '''Add start/stop codons to plot.'''
+
+    for tran in tranList:
+        if tran.annot:                                        # only annotations know about polyAs
+            for exon in tran.exons:
+                if hasattr (exon, 'polyAs'):
+                    for start, end, howmany in exon.polyAs:
+                        plotA (tran, start, blocks)
+                        logger.debug ('%s: %9d' % (exon.name, start))
+
+    return
+
+def plotA (tran, posit, blocks):
+    '''Add a polyA mark to the plot.'''
+
+    for blk in blocks:
+
+        if blk.start <= posit and blk.end >= posit or \
+                blk.start >= posit and blk.end <= posit:      # check in both strand directions
+
+            xPos = blk.boundary - abs(blk.end-posit)
+            plt.scatter (xPos, tran.tranIx+1, s=25, c='yellow', marker='o', zorder=2)    # zorder: put marks on top of lines
+            break
+
+    return
+
 def plotBoundaries (tranNames, blocks):
     '''Plot exon boundaries as vertical lines.'''
 
@@ -446,13 +520,17 @@ def plotBoundaries (tranNames, blocks):
             ticksEnd.append(bound.boundary)
             labelsEnd.append(str(bound.end))
 
-        frompos = bound.boundary       # new block start
+        frompos = bound.boundary           # new block start
+
+    numberedNames = list()                 # cluster name + line number
+    for ix, name in enumerate(tranNames):
+        numberedNames.append('%s %3d' % (name, ix+1)) 
 
     plt.grid(axis='y')                     # turn on horizontal dotted lines
     plt.xlim (0, blocks[-1].boundary)
     plt.ylim (len(tranNames)+1, 0)
     plt.xticks (ticksStart, labelsStart, fontsize='xx-small')
-    plt.yticks (xrange(1,len(tranNames)+2), tranNames, fontsize='xx-small')
+    plt.yticks (xrange(1,len(tranNames)+2), numberedNames, fontsize='xx-small')
 
     # These lines came from an obscure posting on StackOverflow. They
     # create a second X axis at the bottom of the figure. I haven't
@@ -471,7 +549,7 @@ def plotBoundaries (tranNames, blocks):
     plt.xlim (0, blocks[-1].boundary)
     plt.ylim (len(tranNames)+1, 0)
     plt.xticks (ticksEnd, labelsEnd, fontsize='xx-small')
-    plt.yticks (xrange(1,len(tranNames)+2), tranNames, fontsize='xx-small')
+    plt.yticks (xrange(1,len(tranNames)+2), numberedNames, fontsize='xx-small')
 
     return
 
@@ -637,6 +715,9 @@ def getParms ():                       # use default input sys.argv[1:]
     parser.add_option ('--omit',    help='clusters to ignore, e.g., c1234,c2345,c3456')
     parser.add_option ('--show',    help='clusters to force shown, even if underpopulated')
     parser.add_option ('--howmany', help='how many clusters to plot (def: all)', type='int')
+    parser.add_option ('--nodups',  help='discard exact duplicate clusters (def: keep all)', action='store_true')
+    parser.add_option ('--minlen',  help='minimum length of plotted cluster (def: all)', type='int')
+    parser.add_option ('--maxlen',  help='maximum length of plotted cluster (def: all)', type='int')
     parser.add_option ('--output',  help='output plot file name (def: %default)')
     parser.add_option ('--flip',    help='reverse plot orientation (def: mRNA 5\' on left)', action='store_true')
     parser.add_option ('--yscale',  help='amount by which to scale Y axis (def: %default)', type='float')

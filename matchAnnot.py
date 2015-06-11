@@ -23,7 +23,7 @@ import ClusterReport as clrep
 import CigarString   as cs
 import PolyA
 
-VERSION = '20150204.01'
+VERSION = '20150512.01'
 
 FLAG_NOT_ALIGNED = 0x04         # SAM file flags
 FLAG_REVERSE     = 0x10
@@ -108,25 +108,25 @@ def main ():
 
         totAlign += 1
 
-        match = re.search(regexMD, line)
-        if match is not None:                         # if  MD string is present
-            cigar = cs.CigarString(cigarString, match.group(1))
-        else:
-            cigar = cs.CigarString(cigarString)
-
         start = int(start)
-        end   = start + cigar.genomicLength() - 1;    # -1 to report last base, rather than last+1
-
         if start < lastPos.get(chr, 0):
             raise RuntimeError ('SAM file is not sorted by position')
         lastPos[chr] = start
 
-        exons = cigar.exons (start)
+        match = re.search(regexMD, line)
+        if match is not None:                         # if  MD string is present
+            cigar = cs.CigarString(cigarString, start, match.group(1))
+        else:
+            cigar = cs.CigarString(cigarString, start)
+
+        end   = start + cigar.genomicLength() - 1;    # -1 to report last base, rather than last+1
+
+        exons = cigar.exons()
 
         strand = '-' if (flags & FLAG_REVERSE) else '+'
 
         if opt.outpickle is not None:
-            myCluster = cl.Cluster(clusterName, flags, chr, start, strand, cigar, bases)    # cigar is a cigarString object
+            myCluster = cl.Cluster(clusterName, flags, chr, start, strand, cigar, bases)    # cigar is a CigarString object
             clusterDict.addCluster (myCluster)
 
         print '\nisoform:  %-16s    %9d                    %9d         %-5s  %s  %6d' \
@@ -139,6 +139,8 @@ def main ():
         print 'cigar:    %s' % cigar.prettyPrint()
         if cigar.MD is not None:
             print 'MD:       %s' % cigar.MD
+
+        cigar.printVariantList()
 
         if opt.clusters is not None:                     # print cluster (cl:) lines
             printClusterReads (clusterList, clusterName)
@@ -478,16 +480,21 @@ def printMatchingExons (ixR, ixT, exonR, exonT):
                exonR.end,   exonT.end,   exonT.end-exonR.end, \
                exonR.end-exonR.start+1,  exonT.end-exonT.start+1, \
                exonR.inserts, exonR.deletes),
-    if hasattr (exonR, 'substs'):
+    if exonR.substs is not None:
         print ' sub: %2d  Q: %4.1f' % (exonR.substs, exonR.QScore()),  # comma: line continued in printStartStop
+
+    print ' %5d  %3d' % (exonR.offset, exonR.size),       # debug
 
 def printReadExon (ixR, exonR):
     '''Print read exon which has no matching transcript exon.'''
 
     print 'exon:                %2d   .   %9d          .      .  %9d          .      .      len: %4d    .  ins: %2d  del: %2d' \
         % (ixR+1, exonR.start, exonR.end, exonR.end-exonR.start+1, exonR.inserts, exonR.deletes),
-    if hasattr (exonR, 'substs'):
-        print ' sub: %2d  Q: %4.1f' % (exonR.substs, exonR.QScore())        # no comma: EOL here
+    if exonR.substs is not None:
+####        print ' sub: %2d  Q: %4.1f' % (exonR.substs, exonR.QScore())        # no comma: EOL here
+        print ' sub: %2d  Q: %4.1f' % (exonR.substs, exonR.QScore()),       # debug
+        
+    print ' %5d  %3d' % (exonR.offset, exonR.size)         # debug
 
 def printTranExon (ixT, exonT):
     '''Print transcript exon which has no matching read exon.'''
@@ -513,22 +520,6 @@ def printClusterReads (clusterList, clusterName):
         flag = 'cl-FL:' if FL == 'FL' else 'cl-nfl:'           # shorten 'nonFL' to 'nfl'
         for ix in xrange(0,len(reads),CL_PER_LINE):            # print N reads to the line
             print '%-7s   %2d  ' % (flag, cellNo), '  '.join(['%-16s' % x for x in reads[ix:ix+CL_PER_LINE] ])
-
-
-def writePickle (filename, clusters):
-    '''Write a dict of cluster objects into a pickle file.'''
-
-    logger.debug('writing matches to pickle file %s' % filename)
-
-    handle = open (filename, 'w')
-    pk = pickle.Pickler (handle, pickle.HIGHEST_PROTOCOL)
-    pk.dump (clusters)
-    handle.close()
-
-    logger.debug('wrote %d clusters to pickle file' % len(clusters))
-
-    return
-
 
 def getParms ():                       # use default input sys.argv[1:]
 

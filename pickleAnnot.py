@@ -11,8 +11,9 @@ import cPickle as pickle
 
 from tt_log import logger
 import Annotations as anno
+import Reference   as ref
 
-VERSION = '20141104.01'
+VERSION = '20150527.01'
 
 def main ():
 
@@ -20,7 +21,7 @@ def main ():
 
     opt, args = getParms()
 
-    # Reading a pickled file and repickling it doesn't make sense. But one day it will...
+    # We may want to re-pickle a pickled annotation file. e.g., to add polyA annotations.
 
     if opt.format == 'pickle':
         annotList   = anno.AnnotationList.fromPickle (opt.gtf)
@@ -28,6 +29,10 @@ def main ():
         annotList   = anno.AnnotationList (opt.gtf, altFormat=True)
     else:
         annotList   = anno.AnnotationList (opt.gtf)
+
+    if opt.ref is not None:            # if a reference was specified, look for PolyA tracts in exons
+        refObj = ref.Reference.fromPickle (opt.ref)
+        annotList.annotatePolyA (refObj)
 
     annotList.toPickle(opt.output)
 
@@ -40,14 +45,13 @@ def getParms ():                       # use default input sys.argv[1:]
 
     parser = optparse.OptionParser(usage='%prog [options]', version=VERSION)
 
-    parser.add_option ('--gtf',       help='annotations file, in format specified by --format')
-    parser.add_option ('--format',    help='annotations in alternate gtf format (def: %default)', \
+    parser.add_option ('--gtf',    help='annotations file, in format specified by --format')
+    parser.add_option ('--format', help='annotations in alternate gtf format (def: %default)', \
                            type='choice', choices=['standard', 'alt', 'pickle'])
+    parser.add_option ('--ref',    help='reference file to search for genomic polyAs, in pickle format (def: none)')
     parser.add_option ('--output', help='output file name (required)')
 
-    parser.set_defaults (gtf=None,
-                         format='standard',
-                         output=None,
+    parser.set_defaults (format='standard',
                          )
 
     opt, args = parser.parse_args()
