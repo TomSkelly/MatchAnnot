@@ -10,7 +10,7 @@ import cPickle as pickle
 
 from tt_log import logger
 
-VERSION = '20150610.01'
+VERSION = '20150623.01'
 logger.debug('version %s loaded' % VERSION)
 
 DEF_WINDOW = 23
@@ -95,6 +95,17 @@ class Reference (object):
             yield chr
 
         return
+
+    def bases (self, chr):
+        '''Given a chromosome name, return the full sequence for it as a string.'''
+
+        # We should only return a pointer here, so this should be more
+        # efficient than the sequence method below, which makes a copy.
+
+        ret = self.ref[chr]
+        if ret is not self.ref[chr]:
+            raise RuntimeError ('not a ref')
+        return ret
 
     def sequence (self, chr, start=1, howmany=None):
 
