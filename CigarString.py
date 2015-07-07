@@ -11,7 +11,7 @@ import re                       # for regular expressions
 import math
 from tt_log import logger
 
-VERSION = '20150611.01'
+VERSION = '20150707.01'
 logger.debug('version %s loaded' % VERSION)
 
 DEF_Q = 50.0                    # Q score for error-free exon
@@ -92,14 +92,14 @@ class CigarString (object):
         for count, op in self.cfields:          # count is a string
 
             if filling:                         # if we're currently concatenating
-                if op in 'SN':                  # if this should be a new field
+                if op in 'SNH':                 # if this should be a new field
                     fields.append(count+op)
-                    filling = False             # S & N should stand alone
+                    filling = False             # S, N and H should stand alone
                 else:
                     fields[-1] += count+op      # add to existing field
             else:
                 fields.append(count+op)         # start a new field
-                if op not in 'SN':              # and add subsequent matches to it
+                if op not in 'SNH':             # and add subsequent matches to it
                     filling = True
 
         return ' '.join(fields)
@@ -262,6 +262,9 @@ class CigarString (object):
                     self.expCfields.append(self.cfields[cfIx])
                     count = 0                                        # cause a bump
 
+                elif op == 'H':
+                    count = 0                                        # cause a bump, but discard the field
+
                 elif op == 'M' and count <= pendingMatches:          # there's a bigger match (possibly spanning introns) in MD string
                     self.expCfields.append( [count, 'M'] )           # count may have been modified
                     pendingMatches -= count
@@ -341,14 +344,16 @@ class CigarString (object):
 def unitTest ():
 
     testcases = ( ['100M', '50T49', [1], '50M 1X 49M'],
-                  ['100M 100N 100M', '99T100', [1,0], '99M 1X 100N 100M'],
-                  ['100M 100N 100M 3S', '200', [0,0], '100M 100N 100M 3S'],
+                  ['100M 100N 100M', '99T100',     [1,0], '99M 1X 100N 100M'],
+                  ['10H 100M 100N 100M', '99T100', [1,0], '99M 1X 100N 100M'],
+                  ['100M 100N 100M 3S',     '200', [0,0], '100M 100N 100M 3S'],
+                  ['100M 100N 100M 3S 10H', '200', [0,0], '100M 100N 100M 3S'],
                   ['10M4D20M 100N 10M', '10^ACGT10T9c9', [1,1], '10M 4D 10M 1X 9M 100N 1X 9M'],
-                  ['20M 100N 20M 100N 20M 100N 20M', '10t49C4C4C4c0c0c2', [1,0,0,6], '10M 1X 9M 100N 20M 100N 20M 100N 1X 4M 1X 4M 1X 4M 1X 1X 1X 2M'],
-                  ['3S 100M 100N 80M3D20M', '50ACT97TCA27^TTT0T19', [3,4], '3S 50M 1X 1X 1X 47M 100N 50M 1X 1X 1X 27M 3D 1X 19M'],
-                  ['100M10D5M 100N 5M 100N 15M', '100^AAAAATTTTT7ACT15', [0,3,0], '100M 10D 5M 100N 2M 1X 1X 1X 100N 15M'],
+                  ['20M 100N 20M 100N 20M 100N 20M', '10t49C4C4C4c0c0c2', [1,0,0,6], '10M 1X 9M 100N 20M 100N 20M 100N 1X 4M 1X 4M 1X 4M 3X 2M'],
+                  ['3S 100M 100N 80M3D20M', '50ACT97TCA27^TTT0T19', [3,4], '3S 50M 3X 47M 100N 50M 3X 27M 3D 1X 19M'],
+                  ['100M10D5M 100N 5M 100N 15M', '100^AAAAATTTTT7ACT15', [0,3,0], '100M 10D 5M 100N 2M 3X 100N 15M'],
                   ['533M1I176M1I66M1I475M1I525M 6725N 62M 10126N 58M 4S', '1837G0G0C0T0C0A1C0T0G0C1T0C0T0G0A0G0C1G0C36', [0,0,19],
-                   '533M 1I 176M 1I 66M 1I 475M 1I 525M 6725N 62M 10126N 1X 1X 1X 1X 1X 1X 1M 1X 1X 1X 1X 1M 1X 1X 1X 1X 1X 1X 1X 1M 1X 1X 36M 4S'],
+                   '533M 1I 176M 1I 66M 1I 475M 1I 525M 6725N 62M 10126N 6X 1M 4X 1M 7X 1M 2X 36M 4S'],
                   )
 
     start = 100000
