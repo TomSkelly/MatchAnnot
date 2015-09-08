@@ -9,7 +9,7 @@ import cPickle as pickle
 
 from tt_log import logger
 
-VERSION = '20150109.01'
+VERSION = '20150814.01'
 logger.debug('version %s loaded' % VERSION)
 
 regexFP = re.compile('f(\d+)p(\d+)')      # finds full and partial read counts in cluster ID
@@ -44,7 +44,8 @@ class Cluster (object):
 
         match = re.search (regexFP, self.name)
         if match is None:
-            raise RuntimeError ('full/partial counts not found in cluster name %s' % self.name)
+####            raise RuntimeError ('full/partial counts not found in cluster name %s' % self.name)
+            return 0, 0
         return int(match.group(1)), int(match.group(2))
 
     def percentGC (self, window):
@@ -120,6 +121,15 @@ class ClusterDict (object):
             yield cluster
 
         return
+
+    def countClustersForGene (self, gene):
+        '''Return count of clusters for gene.'''
+
+        gd = self.getGeneDict()
+        if gene not in gd:
+            return 0
+
+        return len(gd[gene])
 
     def toPickle (self, filename):
 
