@@ -20,7 +20,7 @@ regexChr = re.compile ('>(\S+)')
 
 class Reference (object):
     
-    def __init__ (self, filename, altFormat=False):
+    def __init__ (self, filename):
         '''Create a dict, keyed by chr, from a fasta file.'''
 
         self.filename = filename
@@ -30,9 +30,9 @@ class Reference (object):
         logger.debug('reading reference fasta file %s' % self.filename)
 
         # Reading fasta lines and appending them one-by-one is very
-        # slow (painter's algorithm). Instead, accumulate individual
-        # lines in a list, and join them when we've got them all. That
-        # turns out to be *much* faster.
+        # slow (the paint bucket keeps getting father away). Instead,
+        # accumulate individual lines in a list, and join them when
+        # we've got them all. That turns out to be *much* faster.
 
         handle = open (self.filename, 'r')
 
