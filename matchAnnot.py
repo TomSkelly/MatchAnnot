@@ -41,7 +41,7 @@ def main ():
     if opt.clusters is not None:
         clusterList = clrep.ClusterList (opt.clusters)     # read the cluster_report.csv file, if supplied
 
-    if opt.format == 'pickle':
+    if opt.format == 'pickle' or opt.gtf.endswith('pickle'):
         annotList = anno.AnnotationList.fromPickle (opt.gtf)
     elif opt.format == 'alt':
         annotList = anno.AnnotationList (opt.gtf, altFormat=True)
